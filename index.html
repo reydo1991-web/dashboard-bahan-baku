@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Dashboard Risiko Expired Bahan Baku</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+:root{
+  --ink:#0F2438; --teal:#1B7A72; --teal-d:#125851; --amber:#C9791E; --red:#B23A3A;
+  --bg:#F3F5F6; --card:#FFFFFF; --line:#DCE2E5; --muted:#5B6B76; --text:#16232B;
+  font-family:'Inter',system-ui,sans-serif;
+}
+:root:not([data-theme="light"]){color-scheme:light dark;}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#0E1620; --card:#152230; --line:#26333E; --muted:#93A3AC; --text:#E7EDEF;}
+}
+:root[data-theme="dark"]{--bg:#0E1620; --card:#152230; --line:#26333E; --muted:#93A3AC; --text:#E7EDEF;}
+*{box-sizing:border-box;}
+html,body{margin:0;height:100%;}
+body{background:var(--bg);color:var(--text);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);-webkit-font-smoothing:antialiased;}
+h1,h2,h3{font-family:'Space Grotesk',sans-serif;margin:0;}
+.mono{font-family:'IBM Plex Mono',monospace;}
+.wrap{max-width:1200px;margin:0 auto;padding:22px 20px 60px;}
+.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
+.topbar .kicker{font-size:11px;letter-spacing:.05em;color:var(--teal-d);font-weight:700;text-transform:uppercase;}
+.topbar h1{font-size:22px;font-weight:700;margin-top:2px;}
+.topbar .desc{color:var(--muted);font-size:13px;margin-top:4px;max-width:600px;}
+.asof{font-size:12px;color:var(--muted);background:var(--card);border:1px solid var(--line);padding:8px 12px;border-radius:10px;}
+.asof b{color:var(--text);}
+.grid{display:grid;gap:14px;}
+.grid-4{grid-template-columns:repeat(4,1fr);}
+@media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr);}}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
+.kpi .n{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;}
+.kpi .l{font-size:11.5px;color:var(--muted);margin-top:2px;}
+.kpi.crit .n{color:var(--red);} .kpi.unk .n{color:var(--amber);} .kpi.safe .n{color:var(--teal-d);}
+.section{margin-top:24px;}
+.section h2{font-size:15px;font-weight:700;margin-bottom:10px;}
+.note{font-size:12px;color:var(--muted);background:var(--card);border:1px dashed var(--line);border-radius:10px;padding:10px 12px;margin-bottom:14px;line-height:1.55;}
+.note code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+.fbtn{border:1px solid var(--line);background:var(--card);color:var(--muted);font-size:12px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer;}
+.fbtn.active{background:var(--ink);color:#fff;border-color:var(--ink);}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:9px 12px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line);background:rgba(0,0,0,.015);white-space:nowrap;}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;}
+tr:last-child td{border-bottom:none;}
+tr.mat-row{cursor:pointer;font-weight:600;}
+tr.mat-row:hover{background:rgba(27,122,114,.06);}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;}
+.badge.E{color:#8A2C2C;background:#FBEAEA;} .badge.C{color:#8A2C2C;background:#FBEAEA;}
+.badge.U{color:#8A5417;background:#FBF1E2;} .badge.S{color:#125851;background:#EAF6F4;}
+.badge.X{color:#5B6B76;background:#E7E9EA;text-decoration:line-through;}
+.badge.D{color:#fff;background:var(--red);}
+.tag{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--line);color:var(--muted);}
+.tag.Q{background:#FBF1E2;color:#8A5417;}
+.batch-detail{background:rgba(0,0,0,.015);}
+.batch-detail td{padding:0;}
+.batch-detail table{margin:4px 10px 10px;width:calc(100% - 20px);}
+.batch-detail th,.batch-detail td{font-size:12px;padding:6px 8px;}
+.batch-detail table{table-layout:auto;}
+.dscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.batch-detail td,.batch-detail th{vertical-align:top;}
+.batch-detail td.nw,.batch-detail th.nw{white-space:nowrap;}
+.batch-detail td.mfr{min-width:120px;max-width:160px;white-space:normal;word-break:normal;overflow-wrap:anywhere;line-height:1.35;}
+.batch-detail .badge{white-space:normal;line-height:1.25;max-width:112px;border-radius:9px;padding:3px 8px;text-align:left;}
+.chev{display:inline-block;transition:transform .15s;margin-right:6px;color:var(--muted);}
+.rot{transform:rotate(90deg);}
+footer{margin-top:28px;font-size:11.5px;color:var(--muted);text-align:center;}
+
+.login{max-width:380px;margin:12vh auto 0;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px;}
+.login h2{font-size:18px;margin-bottom:4px;}
+.login p{font-size:12.5px;color:var(--muted);margin:0 0 16px;line-height:1.5;}
+.login label{display:block;font-size:12px;font-weight:600;margin:12px 0 4px;}
+.login input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;}
+.login button{width:100%;margin-top:18px;padding:10px;border:0;border-radius:8px;background:var(--ink);color:#fff;font-weight:700;font-size:14px;cursor:pointer;}
+.login button:disabled{opacity:.6;cursor:wait;}
+.err{color:#8A2C2C;background:#FBEAEA;border-radius:8px;padding:8px 10px;font-size:12.5px;margin-top:12px;display:none;}
+.topright{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);flex-wrap:wrap;}
+.linkbtn{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;}
+.hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+<div id="loginView" class="login hidden">
+  <h2>Dashboard Bahan Baku</h2>
+  <p>Khusus karyawan. Masuk dengan email perusahaan (@satoriagroup.co.id). Akun dibuat oleh admin.</p>
+  <label for="em">Email</label><input id="em" type="email" autocomplete="username" placeholder="nama@satoriagroup.co.id">
+  <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">
+  <button id="btnLogin">Masuk</button>
+  <div class="err" id="loginErr"></div>
+</div>
+
+<div id="appView" class="wrap hidden">
+  <div class="topbar">
+    <div>
+      <div class="kicker">PPIC · Monitoring Bahan Baku</div>
+      <h1>Dashboard Risiko Expired Bahan Baku</h1>
+      <div class="desc" id="descTxt"></div>
+    </div>
+    <div class="topright"><div class="asof" id="asofTxt"></div><span id="whoami"></span><button class="linkbtn" id="btnLogout">Keluar</button></div>
+  </div>
+  <div id="loadMsg" class="note">Memuat data...</div>
+  <div id="content" class="hidden">
+  <div class="grid grid-4">
+    <div class="kpi crit"><div class="n" id="kpiExpired">-</div><div class="l">Batch sudah EXPIRED</div></div>
+    <div class="kpi unk"><div class="n" id="kpiUnk">-</div><div class="l" id="lblUnk"></div></div>
+    <div class="kpi safe"><div class="n" id="kpiSafe">-</div><div class="l" id="lblSafe"></div></div>
+    <div class="kpi crit"><div class="n" id="kpiShort">-</div><div class="l">Material stok TIDAK CUKUP (perlu Purchasing)</div></div>
+  </div>
+  <div class="section">
+    <h2>⚠️ Material dengan Kebutuhan &gt; Total Stok (Released+Quarantine) — Resume Aksi</h2>
+    <div class="note" id="noteShort"></div>
+    <div class="card"><table>
+      <thead><tr><th>Kode</th><th>Material</th><th>Released</th><th>Quarantine</th><th>Rejected</th><th>Rencana Pakai</th><th>Rekomendasi Aksi</th></tr></thead>
+      <tbody id="shortBody"></tbody></table></div>
+  </div>
+  <div class="section">
+    <h2>Monitoring Risiko Expired per Batch</h2>
+    <div class="note" id="noteCalc"></div>
+    <div class="filters" id="filters"></div>
+    <div class="card"><table>
+      <thead><tr><th style="width:36px"></th><th>Kode</th><th>Nama Material</th><th>Jml Batch</th><th>Status Terburuk</th><th>Stok Released</th><th>Stok Non-Released</th><th>Total Pemakaian (Consum)</th></tr></thead>
+      <tbody id="matBody"></tbody></table></div>
+  </div>
+  <footer id="footerTxt"></footer>
+  </div>
+</div>
+
+<script>
+const SUPA_URL='https://awteyegjgoesfiyitcif.supabase.co';
+const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF3dGV5ZWdqZ29lc2ZpeWl0Y2lmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1NzkxNDcsImV4cCI6MjEwNjE1NTE0N30.3fJ5xTgpwuFTUZuA9w4xLZq1it69J4HS23kPKADSKYo';
+const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+const $ = id => document.getElementById(id);
+
+// ---------- helpers ----------
+const fmt = n => Number(n).toLocaleString('id-ID',{maximumFractionDigits:0});
+const dfmt = s => s ? new Date(s+'T00:00:00').toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}) : '-';
+const pfmt = s => { if(!s) return ''; const [y,m,d]=s.split('-'); return d+'/'+m+'/'+y.slice(2); };
+const period = (a,b) => !a ? '—' : (a===b ? pfmt(a) : pfmt(a)+' s.d '+pfmt(b));
+const iso = d => d.toISOString().slice(0,10);
+const addDays = (s,n) => { const d=new Date(s+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return iso(d); };
+function subMonth(s){ const [y,m,d]=s.split('-').map(Number); const t=new Date(Date.UTC(y,m-2,1)); const last=new Date(Date.UTC(t.getUTCFullYear(),t.getUTCMonth()+1,0)).getUTCDate(); t.setUTCDate(Math.min(d,last)); return iso(t); }
+const fmt1 = n => Number(n).toLocaleString('id-ID',{maximumFractionDigits:1});
+const r1 = n => Math.round(n*10)/10;
+const daysBetween = (a,b) => Math.round((new Date(b+'T00:00:00Z')-new Date(a+'T00:00:00Z'))/86400000);
+const TIER_LABEL = {E:'Sudah Expired (hari ini)', C:'Expired (sisa umur <1 bln stlh akhir data)', U:'Tersisa (belum pasti, sisa umur >1 bln)', S:'Habis Terpakai', X:'Rejected (tdk terpakai)', D:'Kurang Stok (Perlu Purchase)'};
+const ACT_TAG = {P:['Perlu Purchasing','C'], PP:['Purchasing + QC','C'], M:['Pantau QC','U']};
+const rank = {D:4,E:3,C:3,U:2,X:2,S:1};
+const rank2 = c => ({P:3,PP:3,M:1}[c]||0);
+const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ---------- engine: simulasi FEFO harian ----------
+function compute(stock, cons, S){
+  const cutoff=S.cutoff_date, dataEnd=S.data_end, qcDays=S.qc_days, qcDate=addDays(cutoff,qcDays);
+  const dates=[]; for(let d=cutoff; d<=dataEnd; d=addDays(d,1)) dates.push(d);
+  const consBy={}; cons.forEach(r=>{ (consBy[r.code] ||= {})[r.day]=Number(r.qty); });
+  const byMat={}; stock.forEach(r=>{ (byMat[r.code] ||= {name:r.name, rows:[]}).rows.push(r); });
+  const batches=[], materials=[];
+  Object.keys(byMat).sort().forEach(code=>{
+    const {name,rows}=byMat[code];
+    const rel=rows.filter(r=>r.status==='RELEASED'), qua=rows.filter(r=>r.status==='QUARANTINE'), rej=rows.filter(r=>r.status==='REJECTED');
+    const pool=[];
+    rel.forEach(r=>pool.push({r,st:'R',avail:cutoff}));
+    qua.forEach(r=>pool.push({r,st:'Q',avail:qcDate}));
+    pool.sort((a,b)=> a.r.exp_date<b.r.exp_date?-1:a.r.exp_date>b.r.exp_date?1:0);
+    pool.forEach(p=>{ p.remaining=Number(p.r.qty); p.used=0; p.p1=null; p.p2=null; });
+    let unmet=0,u1=null,u2=null; const series=consBy[code]||{};
+    dates.forEach(day=>{
+      let dem=series[day]||0; if(dem<=0) return;
+      for(const p of pool){
+        if(dem<=0) break; if(p.avail>day||p.remaining<=0) continue;
+        const t=Math.min(p.remaining,dem); p.remaining-=t; p.used+=t; dem-=t;
+        if(!p.p1) p.p1=day; p.p2=day;
+      }
+      if(dem>0.01){ unmet+=dem; if(!u1) u1=day; u2=day; }
+    });
+    pool.forEach(p=>{
+      const exp=p.r.exp_date, th=subMonth(exp), rem=p.remaining; let tier;
+      if(exp<cutoff) tier='E'; else if(rem>0.01&&th<=dataEnd) tier='C'; else if(rem>0.01) tier='U'; else tier='S';
+      batches.push({c:code,b:p.r.batch,m:p.r.manufacturer,e:exp,t:th,q:Number(p.r.qty),u:r1(p.used),r:r1(rem),tier,st:p.st,p1:p.p1,p2:p.p2});
+    });
+    rej.forEach(r=>batches.push({c:code,b:r.batch,m:r.manufacturer,e:r.exp_date,t:subMonth(r.exp_date),q:Number(r.qty),u:0,r:r1(Number(r.qty)),tier:'X',st:'X',p1:null,p2:null}));
+    if(unmet>0.01) batches.push({c:code,b:'(Belum ada batch)',m:null,e:null,t:null,q:null,u:r1(unmet),r:r1(-unmet),tier:'D',st:'D',p1:u1,p2:u2});
+    const sum=a=>a.reduce((x,y)=>x+Number(y),0);
+    const R0=sum(rel.map(r=>r.qty)), Qq=sum(qua.map(r=>r.qty)), Qx=sum(rej.map(r=>r.qty));
+    const total=Object.values(series).reduce((a,b)=>a+b,0);
+    let act=null,cat=null; const sf=r1(unmet);
+    if(sf>0.01){
+      if(Qq<=0.01){ act=`PERLU PURCHASING — tidak ada stok Quarantine yang bisa membantu. Defisit ${fmt1(sf)}.`; cat='P'; }
+      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — meskipun stok Quarantine (${fmt1(Qq)}) di-release QC (H+${qcDays} hari), masih kurang.`; cat='PP'; }
+    } else if(Qq>0.01){
+      const qu=sum(pool.filter(p=>p.st==='Q').map(p=>p.used));
+      if(qu>0.01){ act=`PANTAU QC RELEASE — simulasi menunjukkan ${fmt1(qu)} dari stok Quarantine akan benar-benar terpakai. Pastikan lolos QC ≤${qcDays} hari, tidak perlu purchasing baru.`; cat='M'; }
+    }
+    materials.push({c:code,n:name.replace(' Pharma Grade','').replace(' Injectable Grade','').replace(' Dihydrate',''),rel:r1(R0),quar:r1(Qq),rej:r1(Qx),cons:r1(total),act,cat});
+  });
+  return {batches,materials,cutoff,dataEnd,qcDays,qcDate};
+}
+
+// ---------- render ----------
+let RAW=null, S=null, matMap={}, filter='ALL';
+function worstTier(bs){ let w='S'; bs.forEach(b=>{ if(rank[b.tier]>rank[w]) w=b.tier; }); return w; }
+function setLabels(){
+  const A=dfmt(RAW.cutoff), B=dfmt(RAW.dataEnd), Q=dfmt(RAW.qcDate);
+  $('descTxt').innerHTML=`Sisa stock per batch diproyeksikan dengan simulasi harian FEFO (expired tercepat dipakai lebih dulu) atas rencana pemakaian ${A} s.d ${B}.`;
+  $('asofTxt').innerHTML=`Per tanggal <b>${A}</b> · Data pemakaian s.d <b>${B}</b>`;
+  $('lblUnk').textContent=`Diproyeksi masih tersisa @ ${B}`;
+  $('lblSafe').textContent=`Habis terpakai sebelum ${B}`;
+  $('noteShort').innerHTML=`Batch <b>Quarantine</b> dianggap baru tersedia mulai <b>${Q}</b> (asumsi lead time QC <b>${RAW.qcDays} hari</b>). Batch <b>Rejected</b> tidak pernah dihitung tersedia. Baris muncul jika ada kebutuhan yang tidak terpenuhi oleh Released+Quarantine, atau jika stok Quarantine memang dibutuhkan (perlu dipantau).`;
+  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dikurangkan ke batch FEFO yang sudah <b>tersedia</b>. Released tersedia sejak ${A}; Quarantine sejak ${Q}; Rejected tidak pernah dialokasikan. Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
+  $('footerTxt').textContent=`Sumber: ${S.stock_file||'-'} & ${S.consumption_file||'-'} · Terakhir diperbarui ${new Date(S.updated_at).toLocaleString('id-ID')}`;
+}
+function render(){
+  const mats=Object.values(matMap); let nE=0,nU=0,nS=0;
+  RAW.batches.forEach(b=>{ if(b.tier==='E') nE++; else if(b.tier==='U'||b.tier==='C') nU++; else if(b.tier==='S') nS++; });
+  $('kpiExpired').textContent=nE; $('kpiUnk').textContent=nU; $('kpiSafe').textContent=nS;
+  const sm=RAW.materials.filter(m=>m.act).sort((a,b)=>rank2(b.cat)-rank2(a.cat)||a.n.localeCompare(b.n));
+  $('kpiShort').textContent=sm.filter(m=>m.cat==='P'||m.cat==='PP').length;
+  $('shortBody').innerHTML=sm.map(m=>{ const [l,t]=ACT_TAG[m.cat]||['-','U'];
+    return `<tr><td class="mono">${esc(m.c)}</td><td>${esc(m.n)}</td><td>${fmt(m.rel)}</td><td>${fmt(m.quar)}</td><td>${fmt(m.rej)}</td><td>${fmt(m.cons)}</td>
+    <td><span class="badge ${t}">${l}</span><div style="margin-top:4px;color:var(--muted);font-size:11.5px;max-width:280px">${esc(m.act)}</div></td></tr>`;
+  }).join('')||'<tr><td colspan="7" style="color:var(--muted)">Tidak ada material dengan kekurangan stok.</td></tr>';
+  const tb=$('matBody'); tb.innerHTML='';
+  mats.sort((a,b)=>rank[worstTier(b.batches)]-rank[worstTier(a.batches)]||a.n.localeCompare(b.n));
+  mats.forEach(m=>{ const wt=worstTier(m.batches); if(filter!=='ALL'&&wt!==filter) return;
+    const tr=document.createElement('tr'); tr.className='mat-row';
+    tr.innerHTML=`<td><span class="chev">▶</span></td><td class="mono">${esc(m.c)}</td><td>${esc(m.n)}</td><td>${m.batches.length}</td><td><span class="badge ${wt}">${TIER_LABEL[wt]}</span></td><td>${fmt(m.rel)}</td><td>${fmt(m.quar+m.rej)}</td><td>${fmt(m.cons)}</td>`;
+    tr.onclick=()=>toggleDetail(tr,m); tb.appendChild(tr); });
+}
+function toggleDetail(tr,m){
+  const chev=tr.querySelector('.chev'), ex=tr.nextElementSibling;
+  if(ex&&ex.classList.contains('batch-detail')){ ex.remove(); chev.classList.remove('rot'); return; }
+  document.querySelectorAll('.batch-detail').forEach(e=>e.remove()); document.querySelectorAll('.chev.rot').forEach(e=>e.classList.remove('rot'));
+  chev.classList.add('rot');
+  const dtr=document.createElement('tr'); dtr.className='batch-detail'; const td=document.createElement('td'); td.colSpan=8;
+  const rows=m.batches.slice().sort((a,b)=>(a.e||'9999').localeCompare(b.e||'9999')).map(b=>`
+    <tr${b.tier==='D'?' style="background:rgba(178,58,58,.06)"':''}>
+      <td class="mono nw">${esc(b.b)}</td><td class="mfr">${esc(b.m)||'—'}</td>
+      <td class="nw">${b.e?dfmt(b.e):'—'}</td><td class="nw">${b.t?dfmt(b.t):'—'}</td>
+      <td class="nw">${b.st==='Q'?'<span class="tag Q">Quarantine</span>':b.st==='X'?'<span class="tag" style="background:#E7E9EA;color:#5B6B76">Rejected</span>':b.st==='D'?'<span class="tag" style="background:var(--red);color:#fff">Defisit</span>':'Released'}</td>
+      <td class="nw">${b.q!=null?fmt(b.q):'—'}</td><td class="nw">${fmt(b.u)}</td>
+      <td class="mono nw" style="font-size:11.5px">${period(b.p1,b.p2)}</td>
+      <td class="nw" style="${b.r<0?'color:var(--red);font-weight:700':''}">${fmt(b.r)}</td>
+      <td><span class="badge ${b.tier}">${TIER_LABEL[b.tier]}</span></td></tr>`).join('');
+  td.innerHTML=`<div class="dscroll"><table><thead><tr><th>Batch</th><th>Manufacturer</th><th>Exp</th><th>H-1</th><th>Status</th><th>Qty Awal</th><th>Terpakai (proj.)</th><th>Periode Pakai</th><th>Sisa @${pfmt(RAW.dataEnd)}</th><th>Risiko</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  dtr.appendChild(td); tr.after(dtr);
+}
+[['ALL','Semua'],['D','Kurang Stok'],['C','Expired'],['U','Tersisa'],['S','Habis Terpakai']].forEach(([k,l])=>{
+  const b=document.createElement('button'); b.className='fbtn'+(k==='ALL'?' active':''); b.textContent=l;
+  b.onclick=()=>{ filter=k; document.querySelectorAll('.fbtn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); render(); };
+  $('filters').appendChild(b);
+});
+
+// ---------- data ----------
+async function fetchAll(table, cols){
+  let out=[], from=0; const step=1000;
+  for(;;){ const {data,error}=await sb.from(table).select(cols).range(from,from+step-1);
+    if(error) throw error; out=out.concat(data); if(data.length<step) break; from+=step; }
+  return out;
+}
+async function loadData(){
+  $('loadMsg').classList.remove('hidden'); $('loadMsg').textContent='Memuat data...'; $('content').classList.add('hidden');
+  try{
+    const {data:sd,error:e0}=await sb.from('app_settings').select('*').eq('id',1).single(); if(e0) throw e0;
+    S=sd;
+    const [stock,cons]=await Promise.all([ fetchAll('stock_batches','code,name,status,batch,manufacturer,mfg_date,exp_date,qty'), fetchAll('consumption_daily','code,day,qty') ]);
+    if(!stock.length) throw new Error('Data stok kosong atau akun ini tidak memiliki akses (hanya email @satoriagroup.co.id).');
+    RAW=compute(stock,cons,S);
+    matMap={}; RAW.materials.forEach(m=>matMap[m.c]=Object.assign({batches:[]},m)); RAW.batches.forEach(b=>matMap[b.c].batches.push(b));
+    setLabels(); render();
+    $('loadMsg').classList.add('hidden'); $('content').classList.remove('hidden');
+  }catch(err){ $('loadMsg').textContent='Gagal memuat data: '+(err.message||err); }
+}
+
+// ---------- auth ----------
+function showLogin(){ $('appView').classList.add('hidden'); $('loginView').classList.remove('hidden'); }
+async function showApp(session){
+  $('loginView').classList.add('hidden'); $('appView').classList.remove('hidden');
+  $('whoami').textContent=session.user.email; await loadData();
+}
+$('btnLogin').onclick=async()=>{
+  const b=$('btnLogin'), er=$('loginErr'); er.style.display='none'; b.disabled=true;
+  const {data,error}=await sb.auth.signInWithPassword({email:$('em').value.trim(),password:$('pw').value});
+  b.disabled=false;
+  if(error){ er.textContent='Email atau password salah, atau akun belum terdaftar.'; er.style.display='block'; return; }
+  $('pw').value=''; showApp(data.session);
+};
+$('pw').addEventListener('keydown',e=>{ if(e.key==='Enter') $('btnLogin').click(); });
+$('btnLogout').onclick=async()=>{ await sb.auth.signOut(); RAW=null; showLogin(); };
+sb.auth.getSession().then(({data})=> data.session ? showApp(data.session) : showLogin());
+</script>
+</body>
+</html>
