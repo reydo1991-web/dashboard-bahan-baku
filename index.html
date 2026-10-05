@@ -85,6 +85,20 @@ footer{margin-top:28px;font-size:11.5px;color:var(--muted);text-align:center;}
 .topright{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);flex-wrap:wrap;}
 .linkbtn{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;}
 .hidden{display:none !important;}
+
+/* --- tata letak rapi: muat 1 layar tanpa terpotong --- */
+.wrap{max-width:1480px;padding-left:16px;padding-right:16px;}
+th{white-space:normal;line-height:1.25;}
+#matBody .badge{white-space:normal;line-height:1.25;max-width:150px;border-radius:9px;text-align:left;}
+.batch-detail td{max-width:0;min-width:100%;}
+.batch-detail .dscroll{max-width:100%;}
+.batch-detail table{table-layout:fixed;width:calc(100% - 20px);}
+.batch-detail th,.batch-detail td{font-size:12px;padding:6px 6px;overflow-wrap:anywhere;}
+.batch-detail td.nw,.batch-detail th.nw{white-space:normal;}
+.batch-detail td.mfr{min-width:0;max-width:none;}
+.batch-detail td.per{font-size:11px;white-space:normal;}
+.batch-detail .badge{max-width:100%;}
+@media(max-width:860px){.batch-detail table{table-layout:auto;min-width:880px;}.batch-detail td.nw{white-space:nowrap;}}
 </style>
 </head>
 <body>
@@ -250,10 +264,10 @@ function toggleDetail(tr,m){
       <td class="nw">${b.e?dfmt(b.e):'—'}</td><td class="nw">${b.t?dfmt(b.t):'—'}</td>
       <td class="nw">${b.st==='Q'?'<span class="tag Q">Quarantine</span>':b.st==='X'?'<span class="tag" style="background:#E7E9EA;color:#5B6B76">Rejected</span>':b.st==='D'?'<span class="tag" style="background:var(--red);color:#fff">Defisit</span>':'Released'}</td>
       <td class="nw">${b.q!=null?fmt(b.q):'—'}</td><td class="nw">${fmt(b.u)}</td>
-      <td class="mono nw" style="font-size:11.5px">${period(b.p1,b.p2)}</td>
+      <td class="mono per">${period(b.p1,b.p2)}</td>
       <td class="nw" style="${b.r<0?'color:var(--red);font-weight:700':''}">${fmt(b.r)}</td>
       <td><span class="badge ${b.tier}">${TIER_LABEL[b.tier]}</span></td></tr>`).join('');
-  td.innerHTML=`<div class="dscroll"><table><thead><tr><th>Batch</th><th>Inbound Date</th><th>Manufacturer</th><th>Exp</th><th>H-1</th><th>Status</th><th>Qty Awal</th><th>Terpakai (proj.)</th><th>Periode Pakai</th><th>Sisa @${pfmt(RAW.dataEnd)}</th><th>Risiko</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  td.innerHTML=`<div class="dscroll"><table><colgroup><col style="width:11%"><col style="width:9%"><col style="width:15%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:6%"><col style="width:7%"><col style="width:13%"><col style="width:7%"><col style="width:9%"></colgroup><thead><tr><th>Batch</th><th>Inbound Date</th><th>Manufacturer</th><th>Exp</th><th>H-1</th><th>Status</th><th>Qty Awal</th><th>Terpakai (proj.)</th><th>Periode Pakai</th><th>Sisa @${pfmt(RAW.dataEnd)}</th><th>Risiko</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   dtr.appendChild(td); tr.after(dtr);
 }
 [['ALL','Semua'],['D','Kurang Stok'],['C','Expired'],['U','Tersisa'],['S','Habis Terpakai']].forEach(([k,l])=>{
