@@ -184,7 +184,7 @@ function compute(stock, cons, S, mats){
     const rel=rows.filter(r=>r.status==='RELEASED'), qua=rows.filter(r=>r.status==='QUARANTINE'), rej=rows.filter(r=>r.status==='REJECTED');
     const pool=[];
     rel.forEach(r=>pool.push({r,st:'R',avail:cutoff}));
-    qua.forEach(r=>pool.push({r,st:'Q',avail:qcDate}));
+    qua.forEach(r=>{ const own=r.inbound_date?addDays(r.inbound_date,qcDays):qcDate; pool.push({r,st:'Q',avail:(own>cutoff?own:cutoff)}); });
     pool.sort((a,b)=> a.r.exp_date<b.r.exp_date?-1:a.r.exp_date>b.r.exp_date?1:0);
     pool.forEach(p=>{ p.remaining=Number(p.r.qty); p.used=0; p.p1=null; p.p2=null; });
     let unmet=0,u1=null,u2=null; const series=consBy[code]||{};
@@ -211,7 +211,7 @@ function compute(stock, cons, S, mats){
     if(sf>0.01){
       if(!rows.length){ act=`PERLU PURCHASING — belum ada stok sama sekali. Kebutuhan ${fmt1(sf)}.`; cat='P'; }
       else if(Qq<=0.01){ act=`PERLU PURCHASING — tidak ada stok Quarantine yang bisa membantu. Defisit ${fmt1(sf)}.`; cat='P'; }
-      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — meskipun stok Quarantine (${fmt1(Qq)}) di-release QC (H+${qcDays} hari), masih kurang.`; cat='PP'; }
+      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — meskipun stok Quarantine (${fmt1(Qq)}) di-release QC (inbound + ${qcDays} hari), masih kurang.`; cat='PP'; }
     } else if(Qq>0.01){
       const qu=sum(pool.filter(p=>p.st==='Q').map(p=>p.used));
       if(qu>0.01){ act=`PANTAU QC RELEASE — simulasi menunjukkan ${fmt1(qu)} dari stok Quarantine akan benar-benar terpakai. Pastikan lolos QC ≤${qcDays} hari, tidak perlu purchasing baru.`; cat='M'; }
@@ -230,8 +230,8 @@ function setLabels(){
   $('asofTxt').innerHTML=`Per tanggal <b>${A}</b> · Data pemakaian s.d <b>${B}</b>`;
   $('lblUnk').textContent=`Diproyeksi masih tersisa @ ${B}`;
   $('lblSafe').textContent=`Habis terpakai sebelum ${B}`;
-  $('noteShort').innerHTML=`Batch <b>Quarantine</b> dianggap baru tersedia mulai <b>${Q}</b> (asumsi lead time QC <b>${RAW.qcDays} hari</b>). Batch <b>Rejected</b> tidak pernah dihitung tersedia. Baris muncul jika ada kebutuhan yang tidak terpenuhi oleh Released+Quarantine, atau jika stok Quarantine memang dibutuhkan (perlu dipantau).`;
-  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dikurangkan ke batch FEFO yang sudah <b>tersedia</b>. Released tersedia sejak ${A}; Quarantine sejak ${Q}; Rejected tidak pernah dialokasikan. Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
+  $('noteShort').innerHTML=`Batch <b>Quarantine</b> dianggap tersedia <b>${RAW.qcDays} hari setelah tanggal inbound</b> (asumsi lead time QC); bila tanggal itu sudah lewat, tersedia sejak <b>${A}</b>. Batch <b>Rejected</b> tidak pernah dihitung tersedia. Baris muncul jika ada kebutuhan yang tidak terpenuhi oleh Released+Quarantine, atau jika stok Quarantine memang dibutuhkan (perlu dipantau).`;
+  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dikurangkan ke batch FEFO yang sudah <b>tersedia</b>. Released tersedia sejak ${A}; Quarantine sejak inbound + ${RAW.qcDays} hari (min. ${A}); Rejected tidak pernah dialokasikan. Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
   $('footerTxt').textContent=`Sumber: ${S.stock_file||'-'} & ${S.consumption_file||'-'} · Terakhir diperbarui ${new Date(S.updated_at).toLocaleString('id-ID')}`;
 }
 function render(){
