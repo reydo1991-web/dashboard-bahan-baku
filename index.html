@@ -220,7 +220,7 @@ function compute(stock, cons, S, mats){
   const dates=[]; for(let d=cutoff; d<=dataEnd; d=addDays(d,1)) dates.push(d);
   const consBy={}; cons.forEach(r=>{ (consBy[r.code] ||= {})[r.day]=Number(r.qty); });
   const byMat={}; stock.forEach(r=>{ (byMat[r.code] ||= {name:r.name, rows:[]}).rows.push(r); });
-  const mname={}; (mats||[]).forEach(m=>{ mname[m.code]=m.name; (byMat[m.code] ||= {name:m.name, rows:[]}); });
+  const mname={}, dcMap={}; (mats||[]).forEach(m=>{ mname[m.code]=m.name; dcMap[m.code]=m.display_code||m.code; (byMat[m.code] ||= {name:m.name, rows:[]}); });
   const batches=[], materials=[], daily={};
   Object.keys(byMat).sort().forEach(code=>{
     const {name,rows}=byMat[code];
@@ -267,7 +267,7 @@ function compute(stock, cons, S, mats){
       const qu=sum(pool.filter(p=>p.st==='Q').map(p=>p.used));
       if(qu>0.01){ act=`PANTAU QC RELEASE — simulasi menunjukkan ${fmt1(qu)} dari stok Quarantine akan benar-benar terpakai. Pastikan lolos QC ≤${qcDays} hari, tidak perlu purchasing baru.`; cat='M'; }
     }
-    materials.push({c:code,n:(mname[code]||name),nb:rows.length,rel:r1(R0),quar:r1(Qq),rej:r1(Qx),cons:r1(total),act,cat});
+    materials.push({c:code,dc:(dcMap[code]||code),n:(mname[code]||name),nb:rows.length,rel:r1(R0),quar:r1(Qq),rej:r1(Qx),cons:r1(total),act,cat});
   });
   return {batches,materials,cutoff,dataEnd,qcDays,qcDate,dates,daily};
 }
@@ -293,14 +293,14 @@ function render(){
   $('kpiShort').textContent=sm.filter(m=>m.cat==='P'||m.cat==='PP').length;
   $('cntMm').textContent=$('kpiShort').textContent!=='0'?$('kpiShort').textContent:''; const nRisk=RAW.batches.filter(b=>b.tier==='E'||b.tier==='C').length; $('cntEd').textContent=nRisk>0?nRisk:'';
   $('shortBody').innerHTML=sm.map(m=>{ const [l,t]=ACT_TAG[m.cat]||['-','U'];
-    return `<tr><td class="mono">${esc(m.c)}</td><td>${esc(m.n)}</td><td>${fmt(m.rel)}</td><td>${fmt(m.quar)}</td><td>${fmt(m.rej)}</td><td>${fmt(m.cons)}</td>
+    return `<tr><td class="mono">${esc(m.dc||m.c)}</td><td>${esc(m.n)}</td><td>${fmt(m.rel)}</td><td>${fmt(m.quar)}</td><td>${fmt(m.rej)}</td><td>${fmt(m.cons)}</td>
     <td><span class="badge ${t}">${l}</span><div style="margin-top:4px;color:var(--muted);font-size:11.5px;max-width:280px">${esc(m.act)}</div></td></tr>`;
   }).join('')||'<tr><td colspan="7" style="color:var(--muted)">Tidak ada material dengan kekurangan stok.</td></tr>';
   const tb=$('matBody'); tb.innerHTML='';
   mats.sort((a,b)=>rank[worstTier(b.batches)]-rank[worstTier(a.batches)]||a.n.localeCompare(b.n));
   mats.forEach(m=>{ const wt=worstTier(m.batches); if(filter!=='ALL'&&wt!==filter) return;
     const tr=document.createElement('tr'); tr.className='mat-row';
-    tr.innerHTML=`<td><span class="chev">▶</span></td><td class="mono">${esc(m.c)}</td><td>${esc(m.n)}${m.nb==0?' <span class="tag Q">Belum ada stok</span>':''}</td><td>${m.nb}</td><td class="nw" style="font-size:12px">${inbRange(m)}</td><td><span class="badge ${wt}">${TIER_LABEL[wt]}</span></td><td>${fmt(m.rel)}</td><td>${fmt(m.quar+m.rej)}</td><td>${fmt(m.cons)}</td>`;
+    tr.innerHTML=`<td><span class="chev">▶</span></td><td class="mono">${esc(m.dc||m.c)}</td><td>${esc(m.n)}${m.nb==0?' <span class="tag Q">Belum ada stok</span>':''}</td><td>${m.nb}</td><td class="nw" style="font-size:12px">${inbRange(m)}</td><td><span class="badge ${wt}">${TIER_LABEL[wt]}</span></td><td>${fmt(m.rel)}</td><td>${fmt(m.quar+m.rej)}</td><td>${fmt(m.cons)}</td>`;
     tr.onclick=()=>toggleDetail(tr,m); tb.appendChild(tr); });
   renderPeriods();
 }
@@ -323,7 +323,7 @@ function renderPeriods(){
   $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia</b> = stok batch Released ditambah batch Quarantine yang sudah lolos QC (inbound + ${RAW.qcDays} hari) pada saat itu, <b>sebelum</b> pemakaian periode berjalan. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
   const mats=RAW.materials.slice().sort((a,b)=>b.cons-a.cons||a.n.localeCompare(b.n));
   if(!pmCode||!RAW.daily[pmCode]) pmCode=mats[0].c;
-  const sel=$('pmSel'); if(!sel.options.length){ mats.forEach(m=>{ const o=document.createElement('option'); o.value=m.c; o.textContent=m.c+' — '+m.n; sel.appendChild(o); }); sel.onchange=()=>{ pmCode=sel.value; renderPeriods(); }; }
+  const sel=$('pmSel'); if(!sel.options.length){ mats.forEach(m=>{ const o=document.createElement('option'); o.value=m.c; o.textContent=(m.dc||m.c)+' — '+m.n; sel.appendChild(o); }); sel.onchange=()=>{ pmCode=sel.value; renderPeriods(); }; }
   sel.value=pmCode;
   if(!$('pmGran').children.length){ [['m','Bulanan'],['w','Mingguan']].forEach(([k,l])=>{ const b=document.createElement('button'); b.className='fbtn'+(k===pmGran?' active':''); b.textContent=l; b.onclick=()=>{ pmGran=k; document.querySelectorAll('#pmGran .fbtn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderPeriods(); }; $('pmGran').appendChild(b); }); }
   // matriks bulanan semua material
@@ -331,7 +331,7 @@ function renderPeriods(){
   const head=gm[mats[0].c];
   let html='<thead><tr><th class="stk">Material</th>'+head.map(g=>`<th class="c">${mLabel(g.key)}<div class="sub">butuh / stok</div></th>`).join('')+'<th class="c">Total butuh</th><th class="c">Total kurang</th></tr></thead><tbody>';
   mats.forEach(m=>{ const gs=gm[m.c]; const tn=gs.reduce((s,g)=>s+g.need,0), ts=gs.reduce((s,g)=>s+g.short,0);
-    html+=`<tr class="pmrow${m.c===pmCode?' sel':''}" data-c="${esc(m.c)}"><td class="stk"><span class="mono">${esc(m.c)}</span> ${esc(m.n)}</td>`+gs.map(g=>{ const bad=g.short>0.01;
+    html+=`<tr class="pmrow${m.c===pmCode?' sel':''}" data-c="${esc(m.c)}"><td class="stk"><span class="mono">${esc(m.dc||m.c)}</span> ${esc(m.n)}</td>`+gs.map(g=>{ const bad=g.short>0.01;
       return g.need<=0.01?`<td class="c" style="color:var(--muted)">—<div class="sub">stok ${nfmt(g.avail)}</div></td>`:`<td class="c${bad?' bad':''}"><b>${nfmt(g.need)}</b><div class="sub">stok ${nfmt(g.avail)}</div></td>`; }).join('')+`<td class="c"><b>${nfmt(tn)}</b></td><td class="c${ts>0.01?' bad':''}"><b>${ts>0.01?nfmt(ts):'0'}</b></td></tr>`; });
   $('pmMatrix').innerHTML=html+'</tbody>';
   document.querySelectorAll('#pmMatrix tr.pmrow').forEach(tr=>tr.onclick=()=>{ pmCode=tr.dataset.c; renderPeriods(); $('pmSel').scrollIntoView({behavior:'smooth',block:'center'}); });
@@ -381,7 +381,7 @@ async function loadData(){
   try{
     const {data:sd,error:e0}=await sb.from('app_settings').select('*').eq('id',1).single(); if(e0) throw e0;
     S=sd;
-    const [stock,cons,mats]=await Promise.all([ fetchAll('stock_batches','code,name,status,batch,manufacturer,mfg_date,exp_date,qty,inbound_date'), fetchAll('consumption_daily','code,day,qty'), fetchAll('materials','code,name,sort_order') ]);
+    const [stock,cons,mats]=await Promise.all([ fetchAll('stock_batches','code,name,status,batch,manufacturer,mfg_date,exp_date,qty,inbound_date'), fetchAll('consumption_daily','code,day,qty'), fetchAll('materials','code,display_code,name,sort_order') ]);
     if(!stock.length) throw new Error('Data stok kosong atau akun ini tidak memiliki akses (hanya email @satoriagroup.co.id).');
     RAW=compute(stock,cons,S,mats);
     matMap={}; RAW.materials.forEach(m=>matMap[m.c]=Object.assign({batches:[]},m)); RAW.batches.forEach(b=>matMap[b.c].batches.push(b));
