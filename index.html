@@ -99,6 +99,21 @@ th{white-space:normal;line-height:1.25;}
 .batch-detail td.per{font-size:11px;white-space:normal;}
 .batch-detail .badge{max-width:100%;}
 @media(max-width:860px){.batch-detail table{table-layout:auto;min-width:880px;}.batch-detail td.nw{white-space:nowrap;}}
+
+/* --- kebutuhan vs stok per periode --- */
+.pm th,.pm td{padding:7px 9px;font-size:12px;}
+.pm td{vertical-align:middle;}
+.pm td.c{text-align:right;vertical-align:middle;white-space:nowrap;}
+.pm th.c{text-align:right;}
+.pm .sub{font-size:10.5px;color:var(--muted);font-weight:400;}
+.pm td.bad{background:rgba(178,58,58,.14);}
+.pm td.bad b{color:var(--red);}
+.pm tr.pmrow{cursor:pointer;} .pm tr.pmrow:hover td{background:rgba(27,122,114,.08);}
+.pm tr.pmrow.sel td.stk{box-shadow:inset 3px 0 0 var(--teal);}
+.pm th.stk,.pm td.stk{position:sticky;left:0;background:var(--card);z-index:1;min-width:190px;white-space:normal;}
+.pm tr.tot td{font-weight:700;border-top:2px solid var(--line);}
+.pmctl{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px;}
+.pmctl select{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;min-width:280px;}
 </style>
 </head>
 <body>
@@ -135,6 +150,17 @@ th{white-space:normal;line-height:1.25;}
     <div class="card"><table>
       <thead><tr><th>Kode</th><th>Material</th><th>Released</th><th>Quarantine</th><th>Rejected</th><th>Rencana Pakai</th><th>Rekomendasi Aksi</th></tr></thead>
       <tbody id="shortBody"></tbody></table></div>
+  </div>
+  <div class="section">
+    <h2>📅 Kebutuhan Pemakaian vs Stok Tersedia per Periode</h2>
+    <div class="note" id="notePm"></div>
+    <div class="card"><table class="pm" id="pmMatrix"></table></div>
+    <div class="pmctl" style="margin-top:14px">
+      <label for="pmSel" style="font-size:12px;font-weight:700;color:var(--muted)">Detail material:</label>
+      <select id="pmSel"></select>
+      <div class="filters" id="pmGran" style="margin:0"></div>
+    </div>
+    <div class="card"><table class="pm" id="pmDetail"></table></div>
   </div>
   <div class="section">
     <h2>Monitoring Risiko Expired per Batch</h2>
@@ -178,7 +204,7 @@ function compute(stock, cons, S, mats){
   const consBy={}; cons.forEach(r=>{ (consBy[r.code] ||= {})[r.day]=Number(r.qty); });
   const byMat={}; stock.forEach(r=>{ (byMat[r.code] ||= {name:r.name, rows:[]}).rows.push(r); });
   const mname={}; (mats||[]).forEach(m=>{ mname[m.code]=m.name; (byMat[m.code] ||= {name:m.name, rows:[]}); });
-  const batches=[], materials=[];
+  const batches=[], materials=[], daily={};
   Object.keys(byMat).sort().forEach(code=>{
     const {name,rows}=byMat[code];
     const rel=rows.filter(r=>r.status==='RELEASED'), qua=rows.filter(r=>r.status==='QUARANTINE'), rej=rows.filter(r=>r.status==='REJECTED');
@@ -186,17 +212,25 @@ function compute(stock, cons, S, mats){
     rel.forEach(r=>pool.push({r,st:'R',avail:cutoff}));
     qua.forEach(r=>{ const own=r.inbound_date?addDays(r.inbound_date,qcDays):qcDate; pool.push({r,st:'Q',avail:(own>cutoff?own:cutoff)}); });
     pool.sort((a,b)=> a.r.exp_date<b.r.exp_date?-1:a.r.exp_date>b.r.exp_date?1:0);
-    pool.forEach(p=>{ p.remaining=Number(p.r.qty); p.used=0; p.p1=null; p.p2=null; });
+    pool.forEach(p=>{ p.remaining=Number(p.r.qty); p.used=0; p.p1=null; p.p2=null; p.th=subMonth(p.r.exp_date); });
     let unmet=0,u1=null,u2=null; const series=consBy[code]||{};
+    const D={n:[],m:[],a0:[],a1:[],qr:[],rk:[]};
+    const availNow=day=>pool.reduce((s,p)=>s+(p.avail<=day?p.remaining:0),0);
     dates.forEach(day=>{
-      let dem=series[day]||0; if(dem<=0) return;
-      for(const p of pool){
-        if(dem<=0) break; if(p.avail>day||p.remaining<=0) continue;
-        const t=Math.min(p.remaining,dem); p.remaining-=t; p.used+=t; dem-=t;
-        if(!p.p1) p.p1=day; p.p2=day;
+      let dem=series[day]||0; const need=dem; const a0=availNow(day);
+      if(dem>0){
+        for(const p of pool){
+          if(dem<=0) break; if(p.avail>day||p.remaining<=0) continue;
+          const t=Math.min(p.remaining,dem); p.remaining-=t; p.used+=t; dem-=t;
+          if(!p.p1) p.p1=day; p.p2=day;
+        }
+        if(dem>0.01){ unmet+=dem; if(!u1) u1=day; u2=day; }
       }
-      if(dem>0.01){ unmet+=dem; if(!u1) u1=day; u2=day; }
+      D.n.push(need); D.m.push(need-(dem>0.01?dem:0)); D.a0.push(a0); D.a1.push(availNow(day));
+      D.qr.push(pool.reduce((s,p)=>s+((p.st==='Q'&&p.avail===day)?Number(p.r.qty):0),0));
+      D.rk.push(pool.reduce((s,p)=>s+((p.th===day&&p.remaining>0.01)?p.remaining:0),0));
     });
+    daily[code]=D;
     pool.forEach(p=>{
       const exp=p.r.exp_date, th=subMonth(exp), rem=p.remaining; let tier;
       if(exp<cutoff) tier='E'; else if(rem>0.01&&th<=dataEnd) tier='C'; else if(rem>0.01) tier='U'; else tier='S';
@@ -218,7 +252,7 @@ function compute(stock, cons, S, mats){
     }
     materials.push({c:code,n:(mname[code]||name),nb:rows.length,rel:r1(R0),quar:r1(Qq),rej:r1(Qx),cons:r1(total),act,cat});
   });
-  return {batches,materials,cutoff,dataEnd,qcDays,qcDate};
+  return {batches,materials,cutoff,dataEnd,qcDays,qcDate,dates,daily};
 }
 
 // ---------- render ----------
@@ -250,6 +284,47 @@ function render(){
     const tr=document.createElement('tr'); tr.className='mat-row';
     tr.innerHTML=`<td><span class="chev">▶</span></td><td class="mono">${esc(m.c)}</td><td>${esc(m.n)}${m.nb==0?' <span class="tag Q">Belum ada stok</span>':''}</td><td>${m.nb}</td><td class="nw" style="font-size:12px">${inbRange(m)}</td><td><span class="badge ${wt}">${TIER_LABEL[wt]}</span></td><td>${fmt(m.rel)}</td><td>${fmt(m.quar+m.rej)}</td><td>${fmt(m.cons)}</td>`;
     tr.onclick=()=>toggleDetail(tr,m); tb.appendChild(tr); });
+  renderPeriods();
+}
+
+// ---------- kebutuhan vs stok per periode ----------
+let pmGran='m', pmCode=null;
+const nfmt=v=>Math.abs(v)>=100?fmt(v):fmt1(v);
+const wkStart=day=>{ const d=new Date(day+'T00:00:00Z'); return addDays(day,-((d.getUTCDay()+6)%7)); };
+function groupPeriods(code,gran){
+  const D=RAW.daily[code], ds=RAW.dates, groups=[]; let cur=null;
+  ds.forEach((day,i)=>{ const key=gran==='w'?wkStart(day):day.slice(0,7);
+    if(!cur||cur.key!==key){ cur={key,start:day,end:day,open:D.a0[i],qcin:0,need:0,met:0,risk:0,close:0}; groups.push(cur); } else cur.qcin+=D.qr[i];
+    cur.end=day; cur.need+=D.n[i]; cur.met+=D.m[i]; cur.risk+=D.rk[i]; cur.close=D.a1[i]; });
+  groups.forEach(g=>{ g.short=Math.max(0,g.need-g.met); g.avail=g.open+g.qcin; }); return groups;
+}
+const mLabel=k=>{ const [y,m]=k.split('-'); return new Date(Date.UTC(+y,+m-1,1)).toLocaleDateString('id-ID',{month:'short',year:'2-digit',timeZone:'UTC'}); };
+const pLabel=(g,gran)=> gran==='w' ? pfmt(g.start).slice(0,5)+' – '+pfmt(g.end).slice(0,5) : mLabel(g.key);
+function renderPeriods(){
+  if(!RAW||!RAW.daily) return;
+  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia</b> = stok batch Released ditambah batch Quarantine yang sudah lolos QC (inbound + ${RAW.qcDays} hari) pada saat itu, <b>sebelum</b> pemakaian periode berjalan. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
+  const mats=RAW.materials.slice().sort((a,b)=>b.cons-a.cons||a.n.localeCompare(b.n));
+  if(!pmCode||!RAW.daily[pmCode]) pmCode=mats[0].c;
+  const sel=$('pmSel'); if(!sel.options.length){ mats.forEach(m=>{ const o=document.createElement('option'); o.value=m.c; o.textContent=m.c+' — '+m.n; sel.appendChild(o); }); sel.onchange=()=>{ pmCode=sel.value; renderPeriods(); }; }
+  sel.value=pmCode;
+  if(!$('pmGran').children.length){ [['m','Bulanan'],['w','Mingguan']].forEach(([k,l])=>{ const b=document.createElement('button'); b.className='fbtn'+(k===pmGran?' active':''); b.textContent=l; b.onclick=()=>{ pmGran=k; document.querySelectorAll('#pmGran .fbtn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderPeriods(); }; $('pmGran').appendChild(b); }); }
+  // matriks bulanan semua material
+  const gm={}; mats.forEach(m=>gm[m.c]=groupPeriods(m.c,'m'));
+  const head=gm[mats[0].c];
+  let html='<thead><tr><th class="stk">Material</th>'+head.map(g=>`<th class="c">${mLabel(g.key)}<div class="sub">butuh / stok</div></th>`).join('')+'<th class="c">Total butuh</th><th class="c">Total kurang</th></tr></thead><tbody>';
+  mats.forEach(m=>{ const gs=gm[m.c]; const tn=gs.reduce((s,g)=>s+g.need,0), ts=gs.reduce((s,g)=>s+g.short,0);
+    html+=`<tr class="pmrow${m.c===pmCode?' sel':''}" data-c="${esc(m.c)}"><td class="stk"><span class="mono">${esc(m.c)}</span> ${esc(m.n)}</td>`+gs.map(g=>{ const bad=g.short>0.01;
+      return g.need<=0.01?`<td class="c" style="color:var(--muted)">—<div class="sub">stok ${nfmt(g.avail)}</div></td>`:`<td class="c${bad?' bad':''}"><b>${nfmt(g.need)}</b><div class="sub">stok ${nfmt(g.avail)}</div></td>`; }).join('')+`<td class="c"><b>${nfmt(tn)}</b></td><td class="c${ts>0.01?' bad':''}"><b>${ts>0.01?nfmt(ts):'0'}</b></td></tr>`; });
+  $('pmMatrix').innerHTML=html+'</tbody>';
+  document.querySelectorAll('#pmMatrix tr.pmrow').forEach(tr=>tr.onclick=()=>{ pmCode=tr.dataset.c; renderPeriods(); $('pmSel').scrollIntoView({behavior:'smooth',block:'center'}); });
+  // detail per periode
+  const m=RAW.materials.find(x=>x.c===pmCode); const gs=groupPeriods(pmCode,pmGran);
+  const T=gs.reduce((a,g)=>({n:a.n+g.need,m:a.m+g.met,s:a.s+g.short,q:a.q+g.qcin,r:a.r+g.risk}),{n:0,m:0,s:0,q:0,r:0});
+  let d=`<thead><tr><th>Periode</th><th class="c">Stok tersedia awal</th><th class="c">+ Rilis QC dalam periode</th><th class="c">Kebutuhan</th><th class="c">Terpenuhi</th><th class="c">Kurang</th><th class="c">Stok akhir</th><th class="c">Sisa saat H-1 (risiko expired)</th><th>Status</th></tr></thead><tbody>`;
+  gs.forEach(g=>{ const bad=g.short>0.01, none=g.need<=0.01;
+    d+=`<tr${bad?' style="background:rgba(178,58,58,.07)"':''}><td class="nw"><b>${pLabel(g,pmGran)}</b>${pmGran==='w'?'':`<div class="sub">${pfmt(g.start)} s.d ${pfmt(g.end)}</div>`}</td><td class="c">${nfmt(g.open)}</td><td class="c">${g.qcin>0.01?'+'+nfmt(g.qcin):'—'}</td><td class="c"><b>${none?'—':nfmt(g.need)}</b></td><td class="c">${none?'—':nfmt(g.met)}</td><td class="c" style="${bad?'color:var(--red);font-weight:700':''}">${bad?nfmt(g.short):'—'}</td><td class="c">${nfmt(g.close)}</td><td class="c" style="${g.risk>0.01?'color:var(--red);font-weight:700':''}">${g.risk>0.01?nfmt(g.risk):'—'}</td><td>${none?'<span class="tag">Tanpa pemakaian</span>':bad?'<span class="badge D">Kurang</span>':'<span class="badge S">Cukup</span>'}</td></tr>`; });
+  d+=`<tr class="tot"><td>Total ${esc(m?m.n:'')}</td><td class="c">—</td><td class="c">${T.q>0.01?'+'+nfmt(T.q):'—'}</td><td class="c">${nfmt(T.n)}</td><td class="c">${nfmt(T.m)}</td><td class="c" style="${T.s>0.01?'color:var(--red)':''}">${T.s>0.01?nfmt(T.s):'0'}</td><td class="c">—</td><td class="c" style="${T.r>0.01?'color:var(--red)':''}">${T.r>0.01?nfmt(T.r):'—'}</td><td></td></tr></tbody>`;
+  $('pmDetail').innerHTML=d;
 }
 function inbRange(m){ const d=m.batches.map(b=>b.i).filter(Boolean).sort(); if(!d.length) return '—'; return d[0]===d[d.length-1]?dfmt(d[0]):dfmt(d[0])+' – '+dfmt(d[d.length-1]); }
 function toggleDetail(tr,m){
