@@ -312,7 +312,7 @@ const wkStart=day=>{ const d=new Date(day+'T00:00:00Z'); return addDays(day,-((d
 function groupPeriods(code,gran){
   const D=RAW.daily[code], ds=RAW.dates, groups=[]; let cur=null;
   ds.forEach((day,i)=>{ const key=gran==='w'?wkStart(day):day.slice(0,7);
-    if(!cur||cur.key!==key){ cur={key,start:day,end:day,open:D.a0[i],qcin:0,need:0,met:0,risk:0,close:0}; groups.push(cur); } else cur.qcin+=D.qr[i];
+    if(!cur||cur.key!==key){ const first=groups.length===0; cur={key,start:day,end:day,open:first?D.a0[i]:D.a1[i-1],qcin:first?0:D.qr[i],need:0,met:0,risk:0,close:0}; groups.push(cur); } else cur.qcin+=D.qr[i];
     cur.end=day; cur.need+=D.n[i]; cur.met+=D.m[i]; cur.risk+=D.rk[i]; cur.close=D.a1[i]; });
   groups.forEach(g=>{ g.short=Math.max(0,g.need-g.met); g.avail=g.open+g.qcin; }); return groups;
 }
@@ -320,7 +320,7 @@ const mLabel=k=>{ const [y,m]=k.split('-'); return new Date(Date.UTC(+y,+m-1,1))
 const pLabel=(g,gran)=> gran==='w' ? pfmt(g.start).slice(0,5)+' – '+pfmt(g.end).slice(0,5) : mLabel(g.key);
 function renderPeriods(){
   if(!RAW||!RAW.daily) return;
-  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia</b> = stok batch Released ditambah batch Quarantine yang sudah lolos QC (inbound + ${RAW.qcDays} hari) pada saat itu, <b>sebelum</b> pemakaian periode berjalan. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
+  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia awal</b> = stok yang sudah tersedia di akhir periode sebelumnya (periode pertama: pada tanggal cutoff, termasuk Quarantine yang sudah melewati masa QC). <b>+ Rilis QC</b> = batch Quarantine yang selesai QC (inbound + ${RAW.qcDays} hari) selama periode itu, termasuk yang selesai tepat di hari pertama periode. <b>Stok tersedia</b> pada matriks = stok awal + rilis QC. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
   const mats=RAW.materials.slice().sort((a,b)=>b.cons-a.cons||a.n.localeCompare(b.n));
   if(!pmCode||!RAW.daily[pmCode]) pmCode=mats[0].c;
   const sel=$('pmSel'); if(!sel.options.length){ mats.forEach(m=>{ const o=document.createElement('option'); o.value=m.c; o.textContent=(m.dc||m.c)+' — '+m.n; sel.appendChild(o); }); sel.onchange=()=>{ pmCode=sel.value; renderPeriods(); }; }
