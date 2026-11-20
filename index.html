@@ -230,15 +230,18 @@ const rank2 = c => ({P:3,PP:3,M:1}[c]||0);
 const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 // ---------- engine: simulasi FEFO harian ----------
-function compute(stock, cons, S, mats){
+function compute(stock, cons, S, mats, plans, leadTimes){
   const cutoff=S.cutoff_date, dataEnd=S.data_end;
   const dates=[]; for(let d=cutoff; d<=dataEnd; d=addDays(d,1)) dates.push(d);
   const consBy={}; cons.forEach(r=>{ (consBy[r.code] ||= {})[r.day]=Number(r.qty); });
   const byMat={}; stock.forEach(r=>{ (byMat[r.code] ||= {name:r.name, rows:[]}).rows.push(r); });
   const mname={}, dcMap={}; (mats||[]).forEach(m=>{ mname[m.code]=m.name; dcMap[m.code]=m.display_code||m.code; (byMat[m.code] ||= {name:m.name, rows:[]}); });
+  const leadByCode={}; (leadTimes||[]).forEach(r=>leadByCode[r.material_code]=Number(r.qc_lead_time_days));
+  const plansByCode={}; (plans||[]).filter(p=>p.status==='PLANNED'||p.status==='CONFIRMED').forEach(p=>{ (plansByCode[p.material_code] ||= []).push(p); (byMat[p.material_code] ||= {name:mname[p.material_code]||p.material_code,rows:[]}); });
   const batches=[], materials=[], daily={};
   Object.keys(byMat).sort().forEach(code=>{
     const {name,rows}=byMat[code];
+    const planned=plansByCode[code]||[];
     const rel=rows.filter(r=>r.fefo_eligible), qua=rows.filter(r=>r.status==='QUARANTINE'), rej=rows.filter(r=>r.status==='REJECTED');
     const pool=[];
     rel.forEach(r=>pool.push({r,st:'R',avail:cutoff}));
@@ -246,8 +249,9 @@ function compute(stock, cons, S, mats){
       const estimated=r.qc_estimated_release_date;
       if(estimated) pool.push({r,st:'Q',avail:(estimated>cutoff?estimated:cutoff)});
     });
-    pool.sort((a,b)=> a.r.exp_date<b.r.exp_date?-1:a.r.exp_date>b.r.exp_date?1:0);
-    pool.forEach(p=>{ p.remaining=Number(p.r.qty); p.used=0; p.p1=null; p.p2=null; p.th=subMonth(p.r.exp_date); });
+    planned.forEach(p=>{ const lead=leadByCode[code]; if(p.expected_inbound_date&&lead>0){ const estimated=addDays(p.expected_inbound_date,lead); pool.push({r:{code,name:mname[code]||name,status:'QUARANTINE',batch:`Rencana inbound ${p.reference_no||p.expected_inbound_date}`,manufacturer:null,inbound_date:p.expected_inbound_date,exp_date:null,qty:Number(p.qty),qc_estimated_release_date:estimated,plannedInbound:true},st:'Q',avail:(estimated>cutoff?estimated:cutoff)}); } });
+    pool.sort((a,b)=> (a.r.exp_date||'9999-12-31').localeCompare(b.r.exp_date||'9999-12-31'));
+    pool.forEach(p=>{ p.remaining=Number(p.r.qty); p.used=0; p.p1=null; p.p2=null; p.th=p.r.exp_date?subMonth(p.r.exp_date):null; });
     let unmet=0,u1=null,u2=null; const series=consBy[code]||{};
     const D={n:[],m:[],a0:[],a1:[],qr:[],rk:[]};
     const availNow=day=>pool.reduce((s,p)=>s+(p.avail<=day?p.remaining:0),0);
@@ -267,6 +271,7 @@ function compute(stock, cons, S, mats){
     });
     daily[code]=D;
     pool.forEach(p=>{
+      if(p.r.plannedInbound) return;
       const exp=p.r.exp_date, th=subMonth(exp), rem=p.remaining; let tier;
       if(exp<cutoff) tier='E'; else if(rem>0.01&&th<=dataEnd) tier='C'; else if(rem>0.01) tier='U'; else tier='S';
       batches.push({c:code,b:p.r.batch,m:p.r.manufacturer,i:p.r.inbound_date,e:exp,t:th,qe:p.r.qc_estimated_release_date,qa:p.r.qc_release_actual_date,q:Number(p.r.qty),u:r1(p.used),r:r1(rem),tier,st:p.st,p1:p.p1,p2:p.p2});
@@ -274,18 +279,18 @@ function compute(stock, cons, S, mats){
     rej.forEach(r=>batches.push({c:code,b:r.batch,m:r.manufacturer,i:r.inbound_date,e:r.exp_date,t:subMonth(r.exp_date),q:Number(r.qty),u:0,r:r1(Number(r.qty)),tier:'X',st:'X',p1:null,p2:null}));
     if(unmet>0.01) batches.push({c:code,b:'(Belum ada batch)',m:null,e:null,t:null,q:null,u:r1(unmet),r:r1(-unmet),tier:'D',st:'D',p1:u1,p2:u2});
     const sum=a=>a.reduce((x,y)=>x+Number(y),0);
-    const R0=sum(rel.map(r=>r.qty)), Qq=sum(qua.map(r=>r.qty)), Qx=sum(rej.map(r=>r.qty));
+    const R0=sum(rel.map(r=>r.qty)), Qq=sum(qua.map(r=>r.qty)), Qp=sum(planned.map(r=>r.qty)), Qx=sum(rej.map(r=>r.qty));
     const total=Object.values(series).reduce((a,b)=>a+b,0);
     let act=null,cat=null; const sf=r1(unmet);
     if(sf>0.01){
       if(!rows.length){ act=`PERLU PURCHASING — belum ada stok sama sekali. Kebutuhan ${fmt1(sf)}.`; cat='P'; }
-      else if(Qq<=0.01){ act=`PERLU PURCHASING — tidak ada stok Quarantine yang bisa membantu. Defisit ${fmt1(sf)}.`; cat='P'; }
-      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — walaupun stok QUARANTINE ${fmt1(Qq)} dihitung tersedia pada estimasi release QC per batch, masih ada kekurangan.`; cat='PP'; }
-    } else if(Qq>0.01){
+      else if(Qq+Qp<=0.01){ act=`PERLU PURCHASING — tidak ada stok QUARANTINE atau inbound rencana yang dapat membantu. Defisit ${fmt1(sf)}.`; cat='P'; }
+      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — walaupun stok QUARANTINE dan inbound rencana dihitung tersedia pada estimasi release QC, masih ada kekurangan.`; cat='PP'; }
+    } else if(Qq+Qp>0.01){
       const qu=sum(pool.filter(p=>p.st==='Q').map(p=>p.used));
-      if(qu>0.01){ act=`PANTAU QC RELEASE — proyeksi memakai ${fmt1(qu)} stok QUARANTINE sesuai estimasi inbound + lead time QC per batch.`; cat='M'; }
+      if(qu>0.01){ act=`PANTAU INBOUND / QC RELEASE — proyeksi memakai ${fmt1(qu)} stok QUARANTINE atau inbound rencana setelah estimasi inbound + lead time QC.`; cat='M'; }
     }
-    materials.push({c:code,dc:(dcMap[code]||code),n:(mname[code]||name),nb:rows.length,rel:r1(R0),quar:r1(Qq),rej:r1(Qx),cons:r1(total),act,cat});
+    materials.push({c:code,dc:(dcMap[code]||code),n:(mname[code]||name),nb:rows.length,rel:r1(R0),quar:r1(Qq),plan:r1(Qp),rej:r1(Qx),cons:r1(total),act,cat});
   });
   return {batches,materials,cutoff,dataEnd,dates,daily};
 }
@@ -300,8 +305,8 @@ function setLabels(){
   $('asofTxt').innerHTML=`Per tanggal <b>${A}</b> · Data pemakaian s.d <b>${B}</b>`;
   $('lblUnk').textContent=`Diproyeksi masih tersisa @ ${B}`;
   $('lblSafe').textContent=`Habis terpakai sebelum ${B}`;
-  $('noteShort').innerHTML=`Batch <b>QUARANTINE</b> dihitung sebagai proyeksi stok pada <b>tanggal inbound + lead time QC material</b>. Tanggal tersebut adalah estimasi perencanaan, bukan keputusan QC aktual. Batch <b>REJECTED</b> tidak pernah dialokasikan; batch expired juga dikecualikan.`;
-  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dialokasikan FEFO ke batch yang telah tersedia. RELEASED tersedia sejak ${A}; QUARANTINE tersedia secara proyeksi pada estimasi release QC (inbound + lead time per material). Detail batch menunjukkan estimasi tersebut dan release QC aktual bila sudah dicatat. Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
+  $('noteShort').innerHTML=`Batch <b>QUARANTINE</b> dan inbound rencana dihitung tersedia untuk kebutuhan pada <b>tanggal inbound + lead time QC material</b>. Tanggal inbound sendiri hanya menambah posisi gudang. Batch <b>REJECTED</b> tidak pernah dialokasikan; batch expired juga dikecualikan.`;
+  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dialokasikan FEFO ke batch yang telah tersedia. RELEASED tersedia sejak ${A}; QUARANTINE dan inbound rencana tersedia secara proyeksi pada estimasi release QC (inbound + lead time per material). Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
   $('footerTxt').textContent=`Sumber: ${S.stock_file||'-'} & ${S.consumption_file||'-'} · Terakhir diperbarui ${new Date(S.updated_at).toLocaleString('id-ID')}`;
 }
 function render(){
@@ -410,7 +415,7 @@ const mLabel=k=>{ const [y,m]=k.split('-'); return new Date(Date.UTC(+y,+m-1,1))
 const pLabel=(g,gran)=> gran==='w' ? pfmt(g.start).slice(0,5)+' – '+pfmt(g.end).slice(0,5) : mLabel(g.key);
 function renderPeriods(){
   if(!RAW||!RAW.daily) return;
-  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia awal</b> = stok yang telah tersedia di akhir periode sebelumnya. <b>+ Rilis QC dalam periode</b> = stok QUARANTINE yang diproyeksikan tersedia pada inbound + lead time QC per material. Periksa apakah tanggal estimasi tersebut lebih awal dari tanggal kebutuhan. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
+  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia awal</b> = stok yang telah tersedia di akhir periode sebelumnya. <b>+ Rilis QC dalam periode</b> = stok QUARANTINE atau inbound rencana yang diproyeksikan tersedia pada inbound + lead time QC per material. Periksa apakah tanggal estimasi tersebut lebih awal dari tanggal kebutuhan. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
   const mats=RAW.materials.slice().sort((a,b)=>b.cons-a.cons||a.n.localeCompare(b.n));
   if(!pmCode||!RAW.daily[pmCode]) pmCode=mats[0].c;
   const sel=$('pmSel'); if(!sel.options.length){ mats.forEach(m=>{ const o=document.createElement('option'); o.value=m.c; o.textContent=(m.dc||m.c)+' — '+m.n; sel.appendChild(o); }); sel.onchange=()=>{ pmCode=sel.value; renderPeriods(); }; }
@@ -471,9 +476,9 @@ async function loadData(){
   try{
     const {data:sd,error:e0}=await sb.from('app_settings').select('*').eq('id',1).single(); if(e0) throw e0;
     S=sd;
-    const [stock,cons,mats,caps,plans]=await Promise.all([ fetchAll('v_stock_batches_qc','code,name,status,batch,manufacturer,mfg_date,exp_date,qty,inbound_date,qc_release_actual_date,qc_estimated_release_date,fefo_eligible'), fetchAll('consumption_daily','code,day,qty'), fetchAll('materials','code,display_code,name,sort_order'), fetchAll('v_material_pallet_positions','code,name,qty_in_storage,units_per_pallet,pallets_in_storage,max_pallet_positions,pallet_variance,utilization_pct,capacity_status'), fetchAll('planned_inbounds','material_code,expected_inbound_date,qty,status') ]);
+    const [stock,cons,mats,caps,plans,leadTimes]=await Promise.all([ fetchAll('v_stock_batches_qc','code,name,status,batch,manufacturer,mfg_date,exp_date,qty,inbound_date,qc_release_actual_date,qc_estimated_release_date,fefo_eligible'), fetchAll('consumption_daily','code,day,qty'), fetchAll('materials','code,display_code,name,sort_order'), fetchAll('v_material_pallet_positions','code,name,qty_in_storage,units_per_pallet,pallets_in_storage,max_pallet_positions,pallet_variance,utilization_pct,capacity_status'), fetchAll('planned_inbounds','material_code,expected_inbound_date,qty,status,reference_no'), fetchAll('qc_lead_times','material_code,qc_lead_time_days') ]);
     if(!stock.length) throw new Error('Data stok kosong atau akun ini tidak memiliki akses (hanya email @satoriagroup.co.id).');
-    RAW=compute(stock,cons,S,mats);
+    RAW=compute(stock,cons,S,mats,plans,leadTimes);
     CAP=caps; PLAN=plans.filter(p=>p.status==='PLANNED'||p.status==='CONFIRMED');
     matMap={}; RAW.materials.forEach(m=>matMap[m.c]=Object.assign({batches:[]},m)); RAW.batches.forEach(b=>matMap[b.c].batches.push(b));
     setLabels(); render(); renderCapacity();
