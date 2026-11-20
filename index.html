@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
-<title>Dashboard Risiko Expired Bahan Baku</title>
+<title>Monitoring Lavel dan ED Material</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -140,7 +140,7 @@ th{white-space:normal;line-height:1.25;}
   <div class="topbar">
     <div>
       <div class="kicker">PPIC · Monitoring Bahan Baku</div>
-      <h1>Dashboard Risiko Expired Bahan Baku</h1>
+      <h1>Monitoring Lavel dan ED Material</h1>
       <div class="desc" id="descTxt"></div>
     </div>
     <div class="topright"><div class="asof" id="asofTxt"></div><span id="whoami"></span><button class="linkbtn" id="btnLogout">Keluar</button></div>
@@ -187,6 +187,7 @@ th{white-space:normal;line-height:1.25;}
       <thead><tr><th style="width:36px"></th><th>Kode</th><th>Nama Material</th><th>Jml Batch</th><th>Inbound Date<br><span style="font-weight:400;font-size:11px">(awal – akhir)</span></th><th>Status Terburuk</th><th>Stok Released</th><th>Stok Non-Released</th><th>Total Pemakaian (Consum)</th></tr></thead>
       <tbody id="matBody"></tbody></table></div>
   </div>
+  </div>
   <div class="tabpane hidden" id="pane-cap" role="tabpanel">
   <div class="section">
     <h2>Kapasitas Pallet per Material</h2>
@@ -194,7 +195,6 @@ th{white-space:normal;line-height:1.25;}
     <div class="card"><table>
       <thead><tr><th>Kode</th><th>Material</th><th>Stok di Gudang</th><th>Kapasitas / Pallet</th><th>Posisi Pallet</th><th>Batas Maksimum</th><th>Selisih</th><th>Utilisasi</th><th>Status Saat Ini</th><th>Puncak Proyeksi</th><th>Overstock Pertama</th></tr></thead>
       <tbody id="capBody"></tbody></table></div>
-  </div>
   </div>
   </div>
   <footer id="footerTxt"></footer>
