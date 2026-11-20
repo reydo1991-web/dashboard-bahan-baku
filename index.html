@@ -253,6 +253,8 @@ const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>
 // ---------- engine: simulasi FEFO harian ----------
 function compute(stock, cons, S, mats, plans, leadTimes){
   const cutoff=S.cutoff_date, dataEnd=S.data_end;
+  const plannedDays=cons.map(r=>r.day).filter(Boolean).sort();
+  const planStart=plannedDays[0]||cutoff, planEnd=plannedDays[plannedDays.length-1]||dataEnd;
   const dates=[]; for(let d=cutoff; d<=dataEnd; d=addDays(d,1)) dates.push(d);
   const consBy={}; cons.forEach(r=>{ (consBy[r.code] ||= {})[r.day]=Number(r.qty); });
   const byMat={}; stock.forEach(r=>{ (byMat[r.code] ||= {name:r.name, rows:[]}).rows.push(r); });
@@ -313,7 +315,7 @@ function compute(stock, cons, S, mats, plans, leadTimes){
     }
     materials.push({c:code,dc:(dcMap[code]||code),n:(mname[code]||name),nb:rows.length,rel:r1(R0),quar:r1(Qq),plan:r1(Qp),rej:r1(Qx),cons:r1(total),act,cat});
   });
-  return {batches,materials,cutoff,dataEnd,dates,daily};
+  return {batches,materials,cutoff,dataEnd,planStart,planEnd,dates,daily};
 }
 
 // ---------- render ----------
@@ -321,9 +323,9 @@ let RAW=null, S=null, matMap={}, filter='ALL';
 let CAP=null, PLAN=[];
 function worstTier(bs){ let w='S'; bs.forEach(b=>{ if(rank[b.tier]>rank[w]) w=b.tier; }); return w; }
 function setLabels(){
-  const A=dfmt(RAW.cutoff), B=dfmt(RAW.dataEnd);
-  $('asofTxt').innerHTML=`Per tanggal <b>${A}</b> · Data pemakaian s.d <b>${B}</b>`;
-  $('noteMovingIntro').innerHTML=`Sisa stok per batch diproyeksikan dengan simulasi harian <b>FEFO</b> (expired tercepat dipakai lebih dulu) atas rencana pemakaian ${A} s.d ${B}.`;
+  const A=dfmt(RAW.cutoff), B=dfmt(RAW.dataEnd), P1=dfmt(RAW.planStart), P2=dfmt(RAW.planEnd);
+  $('asofTxt').innerHTML=`Rencana pemakaian <b>${P1}</b> s.d <b>${P2}</b>`;
+  $('noteMovingIntro').innerHTML=`Sisa stok per batch diproyeksikan dengan simulasi harian <b>FEFO</b> (expired tercepat dipakai lebih dulu) atas rencana pemakaian ${P1} s.d ${P2}.`;
   $('noteShort').innerHTML=`Batch <b>QUARANTINE</b> dan inbound rencana dihitung tersedia untuk kebutuhan pada <b>tanggal inbound + lead time QC material</b>. Tanggal inbound sendiri hanya menambah posisi gudang. Batch <b>REJECTED</b> tidak pernah dialokasikan; batch expired juga dikecualikan.`;
   $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dialokasikan FEFO ke batch yang telah tersedia. RELEASED tersedia sejak ${A}; QUARANTINE dan inbound rencana tersedia secara proyeksi pada estimasi release QC (inbound + lead time per material). Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
   $('footerTxt').textContent=`Sumber: ${S.stock_file||'-'} & ${S.consumption_file||'-'} · Terakhir diperbarui ${new Date(S.updated_at).toLocaleString('id-ID')}`;
