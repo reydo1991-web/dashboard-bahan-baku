@@ -199,7 +199,7 @@ th{white-space:normal;line-height:1.25;}
     <h2>Kapasitas Pallet per Material</h2>
     <div class="note" id="noteCap"></div>
     <div class="card"><table>
-      <thead><tr><th>Kode</th><th>Material</th><th>Stok di Gudang</th><th>Kapasitas / Pallet</th><th>Posisi Pallet</th><th>Batas Maksimum</th><th>Selisih</th><th>Utilisasi</th><th>Status Saat Ini</th><th>Puncak Proyeksi</th><th>Overstock Pertama</th></tr></thead>
+      <thead><tr><th>Kode</th><th>Material</th><th>Stok di Gudang</th><th>Kapasitas / Pallet</th><th>Posisi Pallet</th><th>Batas Maksimum</th><th>Selisih</th><th>Utilisasi</th><th>Status Saat Ini</th><th>Puncak Proyeksi</th><th>Overstock Pertama</th><th>Rekomendasi Gudang</th></tr></thead>
       <tbody id="capBody"></tbody></table></div>
   </div>
   <div class="section">
@@ -356,16 +356,24 @@ function renderCapacity(){
   $('kpiCap').textContent=flagged.length;
   $('cntCap').textContent=flagged.length?flagged.length:'';
   $('noteCap').innerHTML=PLAN.length
-    ? `<b>Proyeksi inbound:</b> ${PLAN.length} jadwal inbound aktif dihitung pada tanggal kedatangan. Stok dikurangi rencana pemakaian harian; puncak posisi pallet dihitung sesaat setelah inbound masuk, sebelum pemakaian hari tersebut. Posisi pallet selalu dibulatkan ke atas.`
+    ? `<b>Proyeksi inbound:</b> ${PLAN.length} jadwal inbound aktif dihitung pada tanggal kedatangan. Stok dikurangi rencana pemakaian harian; puncak posisi pallet dihitung sesaat setelah inbound masuk, sebelum pemakaian hari tersebut. Posisi pallet selalu dibulatkan ke atas. Kolom rekomendasi membedakan tindakan untuk kondisi aktual dan risiko pada periode mendatang.`
     : `<b>Posisi saat ini:</b> stok RELEASED + QUARANTINE dibagi kapasitas per pallet, lalu dibulatkan ke atas. Belum ada jadwal inbound masa depan; unggah jadwal tersebut agar sistem dapat menentukan periode overstock berikutnya.`;
   const order={OVERSTOCK:2,WARNING:1,SAFE:0};
   $('capBody').innerHTML=CAP.slice().sort((a,b)=>order[b.capacity_status]-order[a.capacity_status]||Number(b.utilization_pct)-Number(a.utilization_pct)||a.name.localeCompare(b.name)).map(r=>{
     const status=r.capacity_status==='OVERSTOCK'?'<span class="badge D">Overstock</span>':r.capacity_status==='WARNING'?'<span class="badge U">Waspada</span>':'<span class="badge S">Aman</span>';
     const variance=Number(r.pallet_variance);
     const f=forecast[r.code]||{};
-    return `<tr><td class="mono">${esc(r.code)}</td><td>${esc(r.name)}</td><td>${fmt1(r.qty_in_storage)}</td><td>${fmt1(r.units_per_pallet)}</td><td><b>${fmt(r.pallets_in_storage)}</b></td><td>${fmt(r.max_pallet_positions)}</td><td style="${variance>0?'color:var(--red);font-weight:700':''}">${variance>0?'+'+fmt(variance):fmt(variance)}</td><td>${Number(r.utilization_pct).toLocaleString('id-ID',{maximumFractionDigits:1})}%</td><td>${status}</td><td><b>${f.peakPallets==null?'—':fmt(f.peakPallets)}</b>${f.peakDate?`<div class="sub">${dfmt(f.peakDate)}</div>`:''}</td><td style="${f.firstOverstock?'color:var(--red);font-weight:700':''}">${f.firstOverstock?dfmt(f.firstOverstock):'—'}</td></tr>`;
-  }).join('')||'<tr><td colspan="11" style="color:var(--muted)">Data kapasitas belum tersedia.</td></tr>';
+    const recommendation=warehouseRecommendation(r,f);
+    return `<tr><td class="mono">${esc(r.code)}</td><td>${esc(r.name)}</td><td>${fmt1(r.qty_in_storage)}</td><td>${fmt1(r.units_per_pallet)}</td><td><b>${fmt(r.pallets_in_storage)}</b></td><td>${fmt(r.max_pallet_positions)}</td><td style="${variance>0?'color:var(--red);font-weight:700':''}">${variance>0?'+'+fmt(variance):fmt(variance)}</td><td>${Number(r.utilization_pct).toLocaleString('id-ID',{maximumFractionDigits:1})}%</td><td>${status}</td><td><b>${f.peakPallets==null?'—':fmt(f.peakPallets)}</b>${f.peakDate?`<div class="sub">${dfmt(f.peakDate)}</div>`:''}</td><td style="${f.firstOverstock?'color:var(--red);font-weight:700':''}">${f.firstOverstock?dfmt(f.firstOverstock):'—'}</td><td style="min-width:260px">${recommendation}</td></tr>`;
+  }).join('')||'<tr><td colspan="12" style="color:var(--muted)">Data kapasitas belum tersedia.</td></tr>';
   renderMonthlyCapacity();
+}
+
+function warehouseRecommendation(row,forecast){
+  if(row.capacity_status==='OVERSTOCK') return `<span class="badge D">Overstock aktual</span><div class="sub" style="margin-top:5px">Aktifkan area overflow yang aman, batasi penerimaan material ini, dan eskalasi ke PPIC/Purchasing hari ini.</div>`;
+  if(row.capacity_status==='WARNING') return `<span class="badge U">Waspada</span><div class="sub" style="margin-top:5px">Siapkan slot atau konsolidasi pallet parsial; konfirmasi kapasitas sebelum inbound berikutnya.</div>`;
+  if(forecast.firstOverstock) return `<span class="badge U">Overstock proyeksi</span><div class="sub" style="margin-top:5px">Koordinasikan penjadwalan ulang atau penerimaan bertahap sebelum ${dfmt(forecast.firstOverstock)}.</div>`;
+  return `<span class="badge S">Aman</span><div class="sub" style="margin-top:5px">Pantau jadwal inbound dan posisi pallet sesuai siklus harian.</div>`;
 }
 
 function renderOutstandingPo(){
