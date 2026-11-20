@@ -227,6 +227,10 @@ function compute(stock, cons, S, mats){
     const rel=rows.filter(r=>r.fefo_eligible), qua=rows.filter(r=>r.status==='QUARANTINE'), rej=rows.filter(r=>r.status==='REJECTED');
     const pool=[];
     rel.forEach(r=>pool.push({r,st:'R',avail:cutoff}));
+    qua.forEach(r=>{
+      const estimated=r.qc_estimated_release_date;
+      if(estimated) pool.push({r,st:'Q',avail:(estimated>cutoff?estimated:cutoff)});
+    });
     pool.sort((a,b)=> a.r.exp_date<b.r.exp_date?-1:a.r.exp_date>b.r.exp_date?1:0);
     pool.forEach(p=>{ p.remaining=Number(p.r.qty); p.used=0; p.p1=null; p.p2=null; p.th=subMonth(p.r.exp_date); });
     let unmet=0,u1=null,u2=null; const series=consBy[code]||{};
@@ -243,7 +247,7 @@ function compute(stock, cons, S, mats){
         if(dem>0.01){ unmet+=dem; if(!u1) u1=day; u2=day; }
       }
       D.n.push(need); D.m.push(need-(dem>0.01?dem:0)); D.a0.push(a0); D.a1.push(availNow(day));
-      D.qr.push(0);
+      D.qr.push(pool.reduce((s,p)=>s+((p.st==='Q'&&p.avail===day)?Number(p.r.qty):0),0));
       D.rk.push(pool.reduce((s,p)=>s+((p.th===day&&p.remaining>0.01)?p.remaining:0),0));
     });
     daily[code]=D;
@@ -261,7 +265,10 @@ function compute(stock, cons, S, mats){
     if(sf>0.01){
       if(!rows.length){ act=`PERLU PURCHASING — belum ada stok sama sekali. Kebutuhan ${fmt1(sf)}.`; cat='P'; }
       else if(Qq<=0.01){ act=`PERLU PURCHASING — tidak ada stok Quarantine yang bisa membantu. Defisit ${fmt1(sf)}.`; cat='P'; }
-      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — stok QUARANTINE ${fmt1(Qq)} belum dapat dialokasikan sampai QC mencatat status RELEASED.`; cat='PP'; }
+      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — walaupun stok QUARANTINE ${fmt1(Qq)} dihitung tersedia pada estimasi release QC per batch, masih ada kekurangan.`; cat='PP'; }
+    } else if(Qq>0.01){
+      const qu=sum(pool.filter(p=>p.st==='Q').map(p=>p.used));
+      if(qu>0.01){ act=`PANTAU QC RELEASE — proyeksi memakai ${fmt1(qu)} stok QUARANTINE sesuai estimasi inbound + lead time QC per batch.`; cat='M'; }
     }
     materials.push({c:code,dc:(dcMap[code]||code),n:(mname[code]||name),nb:rows.length,rel:r1(R0),quar:r1(Qq),rej:r1(Qx),cons:r1(total),act,cat});
   });
@@ -277,8 +284,8 @@ function setLabels(){
   $('asofTxt').innerHTML=`Per tanggal <b>${A}</b> · Data pemakaian s.d <b>${B}</b>`;
   $('lblUnk').textContent=`Diproyeksi masih tersisa @ ${B}`;
   $('lblSafe').textContent=`Habis terpakai sebelum ${B}`;
-  $('noteShort').innerHTML=`Batch <b>QUARANTINE</b> dan <b>REJECTED</b> tidak pernah dihitung tersedia. Hanya batch <b>RELEASED</b> yang belum expired dapat dialokasikan dengan FEFO. Estimasi tanggal release QC adalah informasi perencanaan, bukan persetujuan alokasi.`;
-  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dikurangkan ke batch <b>RELEASED</b> dan belum expired dengan urutan FEFO. QUARANTINE tidak dialokasikan sampai QC mengubah status dan mencatat release aktual. Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
+  $('noteShort').innerHTML=`Batch <b>QUARANTINE</b> dihitung sebagai proyeksi stok pada <b>tanggal inbound + lead time QC material</b>. Tanggal tersebut adalah estimasi perencanaan, bukan keputusan QC aktual. Batch <b>REJECTED</b> tidak pernah dialokasikan; batch expired juga dikecualikan.`;
+  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dialokasikan FEFO ke batch yang telah tersedia. RELEASED tersedia sejak ${A}; QUARANTINE tersedia secara proyeksi pada estimasi release QC (inbound + lead time per material). Detail batch menunjukkan estimasi tersebut dan release QC aktual bila sudah dicatat. Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
   $('footerTxt').textContent=`Sumber: ${S.stock_file||'-'} & ${S.consumption_file||'-'} · Terakhir diperbarui ${new Date(S.updated_at).toLocaleString('id-ID')}`;
 }
 function render(){
@@ -316,7 +323,7 @@ const mLabel=k=>{ const [y,m]=k.split('-'); return new Date(Date.UTC(+y,+m-1,1))
 const pLabel=(g,gran)=> gran==='w' ? pfmt(g.start).slice(0,5)+' – '+pfmt(g.end).slice(0,5) : mLabel(g.key);
 function renderPeriods(){
   if(!RAW||!RAW.daily) return;
-  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia awal</b> hanya mencakup batch RELEASED dan belum expired. <b>+ Rilis QC</b> akan muncul setelah status dan tanggal release aktual diperbarui di data sumber; lead time QC tidak merilis stok otomatis. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
+  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia awal</b> = stok yang telah tersedia di akhir periode sebelumnya. <b>+ Rilis QC dalam periode</b> = stok QUARANTINE yang diproyeksikan tersedia pada inbound + lead time QC per material. Periksa apakah tanggal estimasi tersebut lebih awal dari tanggal kebutuhan. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
   const mats=RAW.materials.slice().sort((a,b)=>b.cons-a.cons||a.n.localeCompare(b.n));
   if(!pmCode||!RAW.daily[pmCode]) pmCode=mats[0].c;
   const sel=$('pmSel'); if(!sel.options.length){ mats.forEach(m=>{ const o=document.createElement('option'); o.value=m.c; o.textContent=(m.dc||m.c)+' — '+m.n; sel.appendChild(o); }); sel.onchange=()=>{ pmCode=sel.value; renderPeriods(); }; }
