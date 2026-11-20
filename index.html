@@ -157,6 +157,7 @@ th{white-space:normal;line-height:1.25;}
     <button class="tab active" role="tab" data-tab="mm" id="tabMm">Moving Material <span class="cnt" id="cntMm"></span></button>
     <button class="tab" role="tab" data-tab="ed" id="tabEd">Monitoring ED <span class="cnt" id="cntEd"></span></button>
     <button class="tab" role="tab" data-tab="cap" id="tabCap">Kapasitas Gudang <span class="cnt" id="cntCap"></span></button>
+    <button class="tab" role="tab" data-tab="po" id="tabPo">OStd PO <span class="cnt" id="cntPo"></span></button>
   </nav>
   <div class="tabpane" id="pane-mm" role="tabpanel">
   <div class="section">
@@ -200,6 +201,21 @@ th{white-space:normal;line-height:1.25;}
     <h2>Posisi Pallet Awal Bulan</h2>
     <div class="note">Setiap kolom menunjukkan posisi pallet pada awal hari pertama bulan, sebelum inbound dan pemakaian pada hari tersebut diproses. Sel merah berarti posisi pallet melebihi batas maksimum material.</div>
     <div class="card dscroll"><table class="pm" id="capMonthly"></table></div>
+  </div>
+  </div>
+  <div class="tabpane hidden" id="pane-po" role="tabpanel">
+  <div class="section">
+    <h2>Outstanding PO per Material</h2>
+    <div class="note" id="notePo"></div>
+    <div class="card"><table>
+      <thead><tr><th>Kode</th><th>Material</th><th>Jumlah PO Terbuka</th><th>Jadwal Inbound</th><th>Total Qty Belum Diterima</th><th>Inbound Terdekat</th><th>Inbound Terakhir</th></tr></thead>
+      <tbody id="poSummaryBody"></tbody></table></div>
+  </div>
+  <div class="section">
+    <h2>Rincian PO Terbuka</h2>
+    <div class="card"><table>
+      <thead><tr><th>Kode</th><th>Material</th><th>PO / Referensi</th><th>Status Jadwal</th><th>Qty Belum Diterima</th><th>Jumlah Jadwal</th><th>Rentang Inbound</th></tr></thead>
+      <tbody id="poDetailBody"></tbody></table></div>
   </div>
   </div>
   <footer id="footerTxt"></footer>
@@ -347,6 +363,29 @@ function renderCapacity(){
   renderMonthlyCapacity();
 }
 
+function renderOutstandingPo(){
+  const active=PLAN.filter(p=>p.status==='PLANNED'||p.status==='CONFIRMED');
+  const nameByCode={}; RAW.materials.forEach(m=>nameByCode[m.c]={name:m.n,display:m.dc||m.c});
+  const byMaterial={}, byPo={};
+  active.forEach(p=>{
+    const code=p.material_code, qty=Number(p.qty)||0, ref=(p.reference_no||'').trim()||'Tanpa referensi';
+    const material=byMaterial[code] ||= {code,name:nameByCode[code]?.name||code,display:nameByCode[code]?.display||code,refs:new Set(),schedules:0,qty:0,dates:[]};
+    material.refs.add(ref); material.schedules++; material.qty+=qty; if(p.expected_inbound_date) material.dates.push(p.expected_inbound_date);
+    const key=code+'|'+ref;
+    const po=byPo[key] ||= {code,name:material.name,display:material.display,ref,statuses:{},schedules:0,qty:0,dates:[]};
+    po.statuses[p.status]=(po.statuses[p.status]||0)+1; po.schedules++; po.qty+=qty; if(p.expected_inbound_date) po.dates.push(p.expected_inbound_date);
+  });
+  const range=dates=>{ const d=dates.slice().sort(); return d.length?{first:d[0],last:d[d.length-1]}:{}; };
+  const mats=Object.values(byMaterial).sort((a,b)=>b.qty-a.qty||a.name.localeCompare(b.name));
+  const pos=Object.values(byPo).sort((a,b)=>a.name.localeCompare(b.name)||a.ref.localeCompare(b.ref));
+  $('cntPo').textContent=pos.length?pos.length:'';
+  $('notePo').innerHTML=pos.length
+    ? `<b>${pos.length} PO terbuka</b> dengan total <b>${fmt(pos.reduce((n,p)=>n+p.qty,0))}</b> unit belum diterima. Sumber data: Google Sheet Rencana Inbound yang tersinkron otomatis. Hanya status <b>PLANNED</b> dan <b>CONFIRMED</b> yang dihitung; ubah baris menjadi <b>RECEIVED</b> setelah penerimaan selesai agar keluar dari daftar ini.`
+    : 'Tidak ada PO terbuka. Baris berstatus PLANNED atau CONFIRMED dari Google Sheet akan tampil di sini.';
+  $('poSummaryBody').innerHTML=mats.map(m=>{ const d=range(m.dates); return `<tr><td class="mono">${esc(m.display)}</td><td>${esc(m.name)}</td><td class="c"><b>${m.refs.size}</b></td><td class="c">${m.schedules}</td><td class="c"><b>${fmt(m.qty)}</b></td><td class="nw">${d.first?dfmt(d.first):'—'}</td><td class="nw">${d.last?dfmt(d.last):'—'}</td></tr>`; }).join('')||'<tr><td colspan="7" style="color:var(--muted)">Tidak ada PO terbuka.</td></tr>';
+  $('poDetailBody').innerHTML=pos.map(p=>{ const d=range(p.dates); const statuses=Object.entries(p.statuses).sort().map(([status,count])=>`${esc(status)} (${count})`).join('<br>'); return `<tr><td class="mono">${esc(p.display)}</td><td>${esc(p.name)}</td><td class="mono">${esc(p.ref)}</td><td>${statuses}</td><td class="c"><b>${fmt(p.qty)}</b></td><td class="c">${p.schedules}</td><td class="nw">${d.first?dfmt(d.first):'—'}${d.last&&d.last!==d.first?`<div class="sub">s.d ${dfmt(d.last)}</div>`:''}</td></tr>`; }).join('')||'<tr><td colspan="7" style="color:var(--muted)">Tidak ada PO terbuka.</td></tr>';
+}
+
 function buildCapacityForecast(){
   if(!RAW||!CAP) return {};
   const inboundByCode={};
@@ -481,7 +520,7 @@ async function loadData(){
     RAW=compute(stock,cons,S,mats,plans,leadTimes);
     CAP=caps; PLAN=plans.filter(p=>p.status==='PLANNED'||p.status==='CONFIRMED');
     matMap={}; RAW.materials.forEach(m=>matMap[m.c]=Object.assign({batches:[]},m)); RAW.batches.forEach(b=>matMap[b.c].batches.push(b));
-    setLabels(); render(); renderCapacity();
+    setLabels(); render(); renderCapacity(); renderOutstandingPo();
     $('loadMsg').classList.add('hidden'); $('content').classList.remove('hidden');
   }catch(err){ $('loadMsg').textContent='Gagal memuat data: '+(err.message||err); }
 }
@@ -491,10 +530,11 @@ function showLogin(){ $('appView').classList.add('hidden'); $('loginView').class
 
 // ---------- menu tab ----------
 function setTab(t){
-  t=['mm','ed','cap'].includes(t)?t:'mm';
+  t=['mm','ed','cap','po'].includes(t)?t:'mm';
   document.querySelectorAll('#tabs .tab').forEach(b=>{ const on=b.dataset.tab===t; b.classList.toggle('active',on); b.setAttribute('aria-selected',on); });
   $('pane-mm').classList.toggle('hidden',t!=='mm'); $('pane-ed').classList.toggle('hidden',t!=='ed');
   $('pane-cap').classList.toggle('hidden',t!=='cap');
+  $('pane-po').classList.toggle('hidden',t!=='po');
   try{ history.replaceState(null,'','#'+t); }catch(e){}
   window.scrollTo({top:0,behavior:'instant'});
 }
