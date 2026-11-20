@@ -216,7 +216,7 @@ const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>
 
 // ---------- engine: simulasi FEFO harian ----------
 function compute(stock, cons, S, mats){
-  const cutoff=S.cutoff_date, dataEnd=S.data_end, qcDays=S.qc_days, qcDate=addDays(cutoff,qcDays);
+  const cutoff=S.cutoff_date, dataEnd=S.data_end;
   const dates=[]; for(let d=cutoff; d<=dataEnd; d=addDays(d,1)) dates.push(d);
   const consBy={}; cons.forEach(r=>{ (consBy[r.code] ||= {})[r.day]=Number(r.qty); });
   const byMat={}; stock.forEach(r=>{ (byMat[r.code] ||= {name:r.name, rows:[]}).rows.push(r); });
@@ -224,10 +224,9 @@ function compute(stock, cons, S, mats){
   const batches=[], materials=[], daily={};
   Object.keys(byMat).sort().forEach(code=>{
     const {name,rows}=byMat[code];
-    const rel=rows.filter(r=>r.status==='RELEASED'), qua=rows.filter(r=>r.status==='QUARANTINE'), rej=rows.filter(r=>r.status==='REJECTED');
+    const rel=rows.filter(r=>r.fefo_eligible), qua=rows.filter(r=>r.status==='QUARANTINE'), rej=rows.filter(r=>r.status==='REJECTED');
     const pool=[];
     rel.forEach(r=>pool.push({r,st:'R',avail:cutoff}));
-    qua.forEach(r=>{ const own=r.inbound_date?addDays(r.inbound_date,qcDays):qcDate; pool.push({r,st:'Q',avail:(own>cutoff?own:cutoff)}); });
     pool.sort((a,b)=> a.r.exp_date<b.r.exp_date?-1:a.r.exp_date>b.r.exp_date?1:0);
     pool.forEach(p=>{ p.remaining=Number(p.r.qty); p.used=0; p.p1=null; p.p2=null; p.th=subMonth(p.r.exp_date); });
     let unmet=0,u1=null,u2=null; const series=consBy[code]||{};
@@ -244,14 +243,14 @@ function compute(stock, cons, S, mats){
         if(dem>0.01){ unmet+=dem; if(!u1) u1=day; u2=day; }
       }
       D.n.push(need); D.m.push(need-(dem>0.01?dem:0)); D.a0.push(a0); D.a1.push(availNow(day));
-      D.qr.push(pool.reduce((s,p)=>s+((p.st==='Q'&&p.avail===day)?Number(p.r.qty):0),0));
+      D.qr.push(0);
       D.rk.push(pool.reduce((s,p)=>s+((p.th===day&&p.remaining>0.01)?p.remaining:0),0));
     });
     daily[code]=D;
     pool.forEach(p=>{
       const exp=p.r.exp_date, th=subMonth(exp), rem=p.remaining; let tier;
       if(exp<cutoff) tier='E'; else if(rem>0.01&&th<=dataEnd) tier='C'; else if(rem>0.01) tier='U'; else tier='S';
-      batches.push({c:code,b:p.r.batch,m:p.r.manufacturer,i:p.r.inbound_date,e:exp,t:th,q:Number(p.r.qty),u:r1(p.used),r:r1(rem),tier,st:p.st,p1:p.p1,p2:p.p2});
+      batches.push({c:code,b:p.r.batch,m:p.r.manufacturer,i:p.r.inbound_date,e:exp,t:th,qe:p.r.qc_estimated_release_date,qa:p.r.qc_release_actual_date,q:Number(p.r.qty),u:r1(p.used),r:r1(rem),tier,st:p.st,p1:p.p1,p2:p.p2});
     });
     rej.forEach(r=>batches.push({c:code,b:r.batch,m:r.manufacturer,i:r.inbound_date,e:r.exp_date,t:subMonth(r.exp_date),q:Number(r.qty),u:0,r:r1(Number(r.qty)),tier:'X',st:'X',p1:null,p2:null}));
     if(unmet>0.01) batches.push({c:code,b:'(Belum ada batch)',m:null,e:null,t:null,q:null,u:r1(unmet),r:r1(-unmet),tier:'D',st:'D',p1:u1,p2:u2});
@@ -262,27 +261,24 @@ function compute(stock, cons, S, mats){
     if(sf>0.01){
       if(!rows.length){ act=`PERLU PURCHASING — belum ada stok sama sekali. Kebutuhan ${fmt1(sf)}.`; cat='P'; }
       else if(Qq<=0.01){ act=`PERLU PURCHASING — tidak ada stok Quarantine yang bisa membantu. Defisit ${fmt1(sf)}.`; cat='P'; }
-      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — meskipun stok Quarantine (${fmt1(Qq)}) di-release QC (inbound + ${qcDays} hari), masih kurang.`; cat='PP'; }
-    } else if(Qq>0.01){
-      const qu=sum(pool.filter(p=>p.st==='Q').map(p=>p.used));
-      if(qu>0.01){ act=`PANTAU QC RELEASE — simulasi menunjukkan ${fmt1(qu)} dari stok Quarantine akan benar-benar terpakai. Pastikan lolos QC ≤${qcDays} hari, tidak perlu purchasing baru.`; cat='M'; }
+      else { act=`PERLU PURCHASING TAMBAHAN ${fmt1(sf)} — stok QUARANTINE ${fmt1(Qq)} belum dapat dialokasikan sampai QC mencatat status RELEASED.`; cat='PP'; }
     }
     materials.push({c:code,dc:(dcMap[code]||code),n:(mname[code]||name),nb:rows.length,rel:r1(R0),quar:r1(Qq),rej:r1(Qx),cons:r1(total),act,cat});
   });
-  return {batches,materials,cutoff,dataEnd,qcDays,qcDate,dates,daily};
+  return {batches,materials,cutoff,dataEnd,dates,daily};
 }
 
 // ---------- render ----------
 let RAW=null, S=null, matMap={}, filter='ALL';
 function worstTier(bs){ let w='S'; bs.forEach(b=>{ if(rank[b.tier]>rank[w]) w=b.tier; }); return w; }
 function setLabels(){
-  const A=dfmt(RAW.cutoff), B=dfmt(RAW.dataEnd), Q=dfmt(RAW.qcDate);
+  const A=dfmt(RAW.cutoff), B=dfmt(RAW.dataEnd);
   $('descTxt').innerHTML=`Sisa stock per batch diproyeksikan dengan simulasi harian FEFO (expired tercepat dipakai lebih dulu) atas rencana pemakaian ${A} s.d ${B}.`;
   $('asofTxt').innerHTML=`Per tanggal <b>${A}</b> · Data pemakaian s.d <b>${B}</b>`;
   $('lblUnk').textContent=`Diproyeksi masih tersisa @ ${B}`;
   $('lblSafe').textContent=`Habis terpakai sebelum ${B}`;
-  $('noteShort').innerHTML=`Batch <b>Quarantine</b> dianggap tersedia <b>${RAW.qcDays} hari setelah tanggal inbound</b> (asumsi lead time QC); bila tanggal itu sudah lewat, tersedia sejak <b>${A}</b>. Batch <b>Rejected</b> tidak pernah dihitung tersedia. Baris muncul jika ada kebutuhan yang tidak terpenuhi oleh Released+Quarantine, atau jika stok Quarantine memang dibutuhkan (perlu dipantau).`;
-  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dikurangkan ke batch FEFO yang sudah <b>tersedia</b>. Released tersedia sejak ${A}; Quarantine sejak inbound + ${RAW.qcDays} hari (min. ${A}); Rejected tidak pernah dialokasikan. Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
+  $('noteShort').innerHTML=`Batch <b>QUARANTINE</b> dan <b>REJECTED</b> tidak pernah dihitung tersedia. Hanya batch <b>RELEASED</b> yang belum expired dapat dialokasikan dengan FEFO. Estimasi tanggal release QC adalah informasi perencanaan, bukan persetujuan alokasi.`;
+  $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dikurangkan ke batch <b>RELEASED</b> dan belum expired dengan urutan FEFO. QUARANTINE tidak dialokasikan sampai QC mengubah status dan mencatat release aktual. Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
   $('footerTxt').textContent=`Sumber: ${S.stock_file||'-'} & ${S.consumption_file||'-'} · Terakhir diperbarui ${new Date(S.updated_at).toLocaleString('id-ID')}`;
 }
 function render(){
@@ -320,7 +316,7 @@ const mLabel=k=>{ const [y,m]=k.split('-'); return new Date(Date.UTC(+y,+m-1,1))
 const pLabel=(g,gran)=> gran==='w' ? pfmt(g.start).slice(0,5)+' – '+pfmt(g.end).slice(0,5) : mLabel(g.key);
 function renderPeriods(){
   if(!RAW||!RAW.daily) return;
-  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia awal</b> = stok yang sudah tersedia di akhir periode sebelumnya (periode pertama: pada tanggal cutoff, termasuk Quarantine yang sudah melewati masa QC). <b>+ Rilis QC</b> = batch Quarantine yang selesai QC (inbound + ${RAW.qcDays} hari) selama periode itu, termasuk yang selesai tepat di hari pertama periode. <b>Stok tersedia</b> pada matriks = stok awal + rilis QC. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
+  $('notePm').innerHTML=`<b>Cara baca:</b> <b>Stok tersedia awal</b> hanya mencakup batch RELEASED dan belum expired. <b>+ Rilis QC</b> akan muncul setelah status dan tanggal release aktual diperbarui di data sumber; lead time QC tidak merilis stok otomatis. <b>Kebutuhan</b> = rencana pemakaian pada periode tersebut. <b>Terpenuhi</b> = bagian kebutuhan yang tertutup stok (FEFO). <b>Kurang</b> = kebutuhan yang tidak tertutup stok yang ada. Periode pertama dimulai dari ${dfmt(RAW.cutoff)}. Sel <span style="background:rgba(178,58,58,.2);padding:0 5px;border-radius:4px">merah</span> = ada kekurangan pada periode itu.`;
   const mats=RAW.materials.slice().sort((a,b)=>b.cons-a.cons||a.n.localeCompare(b.n));
   if(!pmCode||!RAW.daily[pmCode]) pmCode=mats[0].c;
   const sel=$('pmSel'); if(!sel.options.length){ mats.forEach(m=>{ const o=document.createElement('option'); o.value=m.c; o.textContent=(m.dc||m.c)+' — '+m.n; sel.appendChild(o); }); sel.onchange=()=>{ pmCode=sel.value; renderPeriods(); }; }
@@ -354,13 +350,13 @@ function toggleDetail(tr,m){
   const rows=m.batches.slice().sort((a,b)=>(a.e||'9999').localeCompare(b.e||'9999')).map(b=>`
     <tr${b.tier==='D'?' style="background:rgba(178,58,58,.06)"':''}>
       <td class="mono nw">${esc(b.b)}</td><td class="nw" style="background:rgba(40,120,200,.12);font-weight:600">${b.i?dfmt(b.i):'—'}</td><td class="mfr">${esc(b.m)||'—'}</td>
-      <td class="nw">${b.e?dfmt(b.e):'—'}</td><td class="nw">${b.t?dfmt(b.t):'—'}</td>
+      <td class="nw">${b.e?dfmt(b.e):'—'}</td><td class="nw">${b.t?dfmt(b.t):'—'}</td><td class="nw">${b.qe?dfmt(b.qe):'—'}</td><td class="nw">${b.qa?dfmt(b.qa):'—'}</td>
       <td class="nw">${b.st==='Q'?'<span class="tag Q">Quarantine</span>':b.st==='X'?'<span class="tag" style="background:#E7E9EA;color:#5B6B76">Rejected</span>':b.st==='D'?'<span class="tag" style="background:var(--red);color:#fff">Defisit</span>':'Released'}</td>
       <td class="nw">${b.q!=null?fmt(b.q):'—'}</td><td class="nw">${fmt(b.u)}</td>
       <td class="mono per">${period(b.p1,b.p2)}</td>
       <td class="nw" style="${b.r<0?'color:var(--red);font-weight:700':''}">${fmt(b.r)}</td>
       <td><span class="badge ${b.tier}">${TIER_LABEL[b.tier]}</span></td></tr>`).join('');
-  td.innerHTML=`<div class="dscroll"><table><colgroup><col style="width:11%"><col style="width:9%"><col style="width:15%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:6%"><col style="width:7%"><col style="width:13%"><col style="width:7%"><col style="width:9%"></colgroup><thead><tr><th>Batch</th><th>Inbound Date</th><th>Manufacturer</th><th>Exp</th><th>H-1</th><th>Status</th><th>Qty Awal</th><th>Terpakai (proj.)</th><th>Periode Pakai</th><th>Sisa @${pfmt(RAW.dataEnd)}</th><th>Risiko</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  td.innerHTML=`<div class="dscroll"><table><thead><tr><th>Batch</th><th>Inbound Date</th><th>Manufacturer</th><th>Exp</th><th>H-1</th><th>Estimasi Release QC</th><th>Release QC Aktual</th><th>Status</th><th>Qty Awal</th><th>Terpakai (proj.)</th><th>Periode Pakai</th><th>Sisa @${pfmt(RAW.dataEnd)}</th><th>Risiko</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   dtr.appendChild(td); tr.after(dtr);
 }
 [['ALL','Semua'],['D','Kurang Stok'],['C','Expired'],['U','Tersisa'],['S','Habis Terpakai']].forEach(([k,l])=>{
@@ -381,7 +377,7 @@ async function loadData(){
   try{
     const {data:sd,error:e0}=await sb.from('app_settings').select('*').eq('id',1).single(); if(e0) throw e0;
     S=sd;
-    const [stock,cons,mats]=await Promise.all([ fetchAll('stock_batches','code,name,status,batch,manufacturer,mfg_date,exp_date,qty,inbound_date'), fetchAll('consumption_daily','code,day,qty'), fetchAll('materials','code,display_code,name,sort_order') ]);
+    const [stock,cons,mats]=await Promise.all([ fetchAll('v_stock_batches_qc','code,name,status,batch,manufacturer,mfg_date,exp_date,qty,inbound_date,qc_release_actual_date,qc_estimated_release_date,fefo_eligible'), fetchAll('consumption_daily','code,day,qty'), fetchAll('materials','code,display_code,name,sort_order') ]);
     if(!stock.length) throw new Error('Data stok kosong atau akun ini tidak memiliki akses (hanya email @satoriagroup.co.id).');
     RAW=compute(stock,cons,S,mats);
     matMap={}; RAW.materials.forEach(m=>matMap[m.c]=Object.assign({batches:[]},m)); RAW.batches.forEach(b=>matMap[b.c].batches.push(b));
