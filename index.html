@@ -35,7 +35,9 @@ h1,h2,h3{font-family:'Space Grotesk',sans-serif;margin:0;}
 .grid{display:grid;gap:14px;}
 .grid-4{grid-template-columns:repeat(4,1fr);}
 @media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr);}}
-.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;text-align:left;width:100%;font:inherit;color:var(--text);}
+.kpi.action{cursor:pointer;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;}
+.kpi.action:hover,.kpi.action:focus-visible{transform:translateY(-2px);border-color:var(--teal);box-shadow:0 5px 15px rgba(15,36,56,.11);outline:none;}
 .kpi .n{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;}
 .kpi .l{font-size:11.5px;color:var(--muted);margin-top:2px;}
 .kpi.crit .n{color:var(--red);} .kpi.unk .n{color:var(--amber);} .kpi.safe .n{color:var(--teal-d);}
@@ -141,17 +143,16 @@ th{white-space:normal;line-height:1.25;}
     <div>
       <div class="kicker">PPIC · Monitoring Bahan Baku</div>
       <h1>Monitoring Lavel dan ED Material</h1>
-      <div class="desc" id="descTxt"></div>
     </div>
     <div class="topright"><div class="asof" id="asofTxt"></div><span id="whoami"></span><button class="linkbtn" id="btnLogout">Keluar</button></div>
   </div>
   <div id="loadMsg" class="note">Memuat data...</div>
   <div id="content" class="hidden">
   <div class="grid grid-4">
-    <div class="kpi crit"><div class="n" id="kpiExpired">-</div><div class="l">Batch sudah EXPIRED</div></div>
-    <div class="kpi unk"><div class="n" id="kpiUnk">-</div><div class="l" id="lblUnk"></div></div>
-    <div class="kpi safe"><div class="n" id="kpiSafe">-</div><div class="l" id="lblSafe"></div></div>
-    <div class="kpi crit"><div class="n" id="kpiShort">-</div><div class="l">Material stok TIDAK CUKUP (perlu Purchasing)</div></div>
+    <button class="kpi crit action" type="button" data-kpi-tab="risk"><div class="n" id="kpiSupply">-</div><div class="l">Material berisiko pasokan</div></button>
+    <button class="kpi crit action" type="button" data-kpi-tab="ed"><div class="n" id="kpiEd">-</div><div class="l">Batch expired / risiko ED</div></button>
+    <button class="kpi unk action" type="button" data-kpi-tab="cap"><div class="n" id="kpiCap">-</div><div class="l">Material kapasitas perlu perhatian</div></button>
+    <button class="kpi safe action" type="button" data-kpi-tab="po"><div class="n" id="kpiPo">-</div><div class="l">PO masih terbuka</div></button>
   </div>
   <nav class="tabs" id="tabs" role="tablist">
     <button class="tab active" role="tab" data-tab="mm" id="tabMm">Moving Material <span class="cnt" id="cntMm"></span></button>
@@ -162,6 +163,7 @@ th{white-space:normal;line-height:1.25;}
   </nav>
   <div class="tabpane" id="pane-mm" role="tabpanel">
   <div class="section">
+    <div class="note" id="noteMovingIntro"></div>
     <h2>📅 Kebutuhan Pemakaian vs Stok Tersedia per Periode</h2>
     <div class="note" id="notePm"></div>
     <div class="card"><table class="pm" id="pmMatrix"></table></div>
@@ -320,10 +322,8 @@ let CAP=null, PLAN=[];
 function worstTier(bs){ let w='S'; bs.forEach(b=>{ if(rank[b.tier]>rank[w]) w=b.tier; }); return w; }
 function setLabels(){
   const A=dfmt(RAW.cutoff), B=dfmt(RAW.dataEnd);
-  $('descTxt').innerHTML=`Sisa stock per batch diproyeksikan dengan simulasi harian FEFO (expired tercepat dipakai lebih dulu) atas rencana pemakaian ${A} s.d ${B}.`;
   $('asofTxt').innerHTML=`Per tanggal <b>${A}</b> · Data pemakaian s.d <b>${B}</b>`;
-  $('lblUnk').textContent=`Diproyeksi masih tersisa @ ${B}`;
-  $('lblSafe').textContent=`Habis terpakai sebelum ${B}`;
+  $('noteMovingIntro').innerHTML=`Sisa stok per batch diproyeksikan dengan simulasi harian <b>FEFO</b> (expired tercepat dipakai lebih dulu) atas rencana pemakaian ${A} s.d ${B}.`;
   $('noteShort').innerHTML=`Batch <b>QUARANTINE</b> dan inbound rencana dihitung tersedia untuk kebutuhan pada <b>tanggal inbound + lead time QC material</b>. Tanggal inbound sendiri hanya menambah posisi gudang. Batch <b>REJECTED</b> tidak pernah dialokasikan; batch expired juga dikecualikan.`;
   $('noteCalc').innerHTML=`<b>Cara hitung:</b> setiap hari, rencana pemakaian dialokasikan FEFO ke batch yang telah tersedia. RELEASED tersedia sejak ${A}; QUARANTINE dan inbound rencana tersedia secara proyeksi pada estimasi release QC (inbound + lead time per material). Kolom <b>H-1</b> = 1 bulan sebelum expired. <span class="badge C" style="padding:1px 6px">Expired</span> = masih ada sisa @${B} dan sisa umur simpan setelahnya &lt;1 bulan. <span class="badge U" style="padding:1px 6px">Tersisa</span> = masih ada sisa @${B}, sisa umur &gt;1 bulan (belum pasti). <span class="badge S" style="padding:1px 6px">Habis Terpakai</span> = sisa 0. Baris <b>"(Belum ada batch)"</b> bersisa minus = kekurangan pasokan yang tidak tertampung batch manapun.`;
   $('footerTxt').textContent=`Sumber: ${S.stock_file||'-'} & ${S.consumption_file||'-'} · Terakhir diperbarui ${new Date(S.updated_at).toLocaleString('id-ID')}`;
@@ -331,10 +331,11 @@ function setLabels(){
 function render(){
   const mats=Object.values(matMap); let nE=0,nU=0,nS=0;
   RAW.batches.forEach(b=>{ if(b.tier==='E') nE++; else if(b.tier==='U'||b.tier==='C') nU++; else if(b.tier==='S') nS++; });
-  $('kpiExpired').textContent=nE; $('kpiUnk').textContent=nU; $('kpiSafe').textContent=nS;
+  const edRisk=RAW.batches.filter(b=>b.tier==='E'||b.tier==='C').length;
+  $('kpiEd').textContent=edRisk;
   const sm=RAW.materials.filter(m=>m.act).sort((a,b)=>rank2(b.cat)-rank2(a.cat)||a.n.localeCompare(b.n));
-  $('kpiShort').textContent=sm.filter(m=>m.cat==='P'||m.cat==='PP').length;
-  $('cntMm').textContent=''; $('cntRisk').textContent=$('kpiShort').textContent!=='0'?$('kpiShort').textContent:''; const nRisk=RAW.batches.filter(b=>b.tier==='E'||b.tier==='C').length; $('cntEd').textContent=nRisk>0?nRisk:'';
+  $('kpiSupply').textContent=sm.filter(m=>m.cat==='P'||m.cat==='PP').length;
+  $('cntMm').textContent=''; $('cntRisk').textContent=$('kpiSupply').textContent!=='0'?$('kpiSupply').textContent:''; $('cntEd').textContent=edRisk>0?edRisk:'';
   $('shortBody').innerHTML=sm.map(m=>{ const [l,t]=ACT_TAG[m.cat]||['-','U'];
     return `<tr><td class="mono">${esc(m.dc||m.c)}</td><td>${esc(m.n)}</td><td>${fmt(m.rel)}</td><td>${fmt(m.quar)}</td><td>${fmt(m.rej)}</td><td>${fmt(m.cons)}</td>
     <td><span class="badge ${t}">${l}</span><div style="margin-top:4px;color:var(--muted);font-size:11.5px;max-width:280px">${esc(m.act)}</div></td></tr>`;
@@ -352,6 +353,7 @@ function renderCapacity(){
   if(!CAP) return;
   const forecast=buildCapacityForecast();
   const flagged=CAP.filter(r=>r.capacity_status!=='SAFE');
+  $('kpiCap').textContent=flagged.length;
   $('cntCap').textContent=flagged.length?flagged.length:'';
   $('noteCap').innerHTML=PLAN.length
     ? `<b>Proyeksi inbound:</b> ${PLAN.length} jadwal inbound aktif dihitung pada tanggal kedatangan. Stok dikurangi rencana pemakaian harian; puncak posisi pallet dihitung sesaat setelah inbound masuk, sebelum pemakaian hari tersebut. Posisi pallet selalu dibulatkan ke atas.`
@@ -382,6 +384,7 @@ function renderOutstandingPo(){
   const mats=Object.values(byMaterial).sort((a,b)=>b.qty-a.qty||a.name.localeCompare(b.name));
   const pos=Object.values(byPo).sort((a,b)=>a.name.localeCompare(b.name)||a.ref.localeCompare(b.ref));
   $('cntPo').textContent=pos.length?pos.length:'';
+  $('kpiPo').textContent=pos.length;
   $('notePo').innerHTML=pos.length
     ? `<b>${pos.length} PO terbuka</b> dengan total <b>${fmt(pos.reduce((n,p)=>n+p.qty,0))}</b> unit belum diterima. Sumber data: Google Sheet Rencana Inbound yang tersinkron otomatis. Hanya status <b>PLANNED</b> dan <b>CONFIRMED</b> yang dihitung; ubah baris menjadi <b>RECEIVED</b> setelah penerimaan selesai agar keluar dari daftar ini.`
     : 'Tidak ada PO terbuka. Baris berstatus PLANNED atau CONFIRMED dari Google Sheet akan tampil di sini.';
@@ -543,6 +546,7 @@ function setTab(t){
   window.scrollTo({top:0,behavior:'instant'});
 }
 document.querySelectorAll('#tabs .tab').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+document.querySelectorAll('[data-kpi-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.kpiTab));
 setTab((location.hash||'').replace('#',''));
 async function showApp(session){
   $('loginView').classList.add('hidden'); $('appView').classList.remove('hidden');
